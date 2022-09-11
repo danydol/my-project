@@ -8,16 +8,6 @@ trigger:
 
 pool:
   vmImage: ubuntu-latest
-
-- task: GitHubRelease@1
-  inputs:
-    gitHubConnection: 'dan'
-    repositoryName: 'danydol/my-project'
-    action: 'edit'
-    target: '$(Build.SourceVersion)'
-    tag: 'latest'
-    changeLogCompareToRelease: 'lastFullRelease'
-    changeLogType: 'commitBased'
 steps:
 - task: NodeTool@0
   inputs:
