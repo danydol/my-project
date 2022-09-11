@@ -33,4 +33,4 @@ steps:
     containerRegistry: 'Docker_Register'
     repository: 'dando1\lab'
     command: 'buildAndPush'
-    Dockerfile: '**/Dockerfile'
+    Dockerfile: 'Dockerfile'
