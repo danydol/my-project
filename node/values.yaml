@@ -133,8 +133,8 @@ externaldb:
 ##
 image:
   registry: docker.io
-  repository: bitnami/node
-  tag: 16.18.0-debian-11-r4
+  repository: dando77/node-app
+  tag: 1.0
   digest: ""
   ## Specify a imagePullPolicy
   ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
