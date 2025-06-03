@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.1.1](https://github.com/izzywdev/deployai/compare/v1.1.0...v1.1.1) (2025-06-03)
+
+
+### Documentation
+
+* add semantic versioning section to README with usage examples ([ebd8de2](https://github.com/izzywdev/deployai/commit/ebd8de2c5ae3ab0f783303b330e554b13477e941))
+
 ## 1.1.0 (2025-06-03)
 
 
