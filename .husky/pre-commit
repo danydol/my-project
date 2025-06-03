@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🔍 Running pre-commit checks..."
+
+# Run version sync to ensure all packages are in sync
+npm run version:sync
+
+# Check if there are staged changes after version sync
+if ! git diff --cached --quiet; then
+  echo "✅ Version sync completed"
+else
+  echo "ℹ️  No version changes needed"
+fi
+
+echo "✅ Pre-commit checks passed!" 

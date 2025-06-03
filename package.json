@@ -9,7 +9,20 @@
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm start",
     "build": "cd frontend && npm run build",
-    "start": "cd backend && npm start"
+    "start": "cd backend && npm start",
+    "version:patch": "npm run version:bump -- patch",
+    "version:minor": "npm run version:bump -- minor",
+    "version:major": "npm run version:bump -- major",
+    "version:bump": "npm version $npm_config_bump --no-git-tag-version && npm run version:sync",
+    "version:sync": "node scripts/sync-versions.js",
+    "release": "npm run build && npm run version:sync && standard-version",
+    "release:patch": "npm run build && standard-version --release-as patch",
+    "release:minor": "npm run build && standard-version --release-as minor",
+    "release:major": "npm run build && standard-version --release-as major",
+    "release:dry-run": "standard-version --dry-run",
+    "postrelease": "git push --follow-tags origin main",
+    "changelog": "conventional-changelog -p angular -i CHANGELOG.md -s",
+    "commit": "git-cz"
   },
   "keywords": [
     "cicd",
@@ -22,6 +35,21 @@
   "author": "Deploy.AI Team",
   "license": "MIT",
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "standard-version": "^9.5.0",
+    "conventional-changelog-cli": "^4.1.0",
+    "commitizen": "^4.3.0",
+    "cz-conventional-changelog": "^3.3.0",
+    "@commitlint/cli": "^18.4.3",
+    "@commitlint/config-conventional": "^18.4.3",
+    "husky": "^8.0.3"
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
+  },
+  "commitlint": {
+    "extends": ["@commitlint/config-conventional"]
   }
 }
