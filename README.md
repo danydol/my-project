@@ -298,7 +298,12 @@ deployai/
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is proprietary and confidential software owned by Deploy.AI. All rights reserved.
+
+Unauthorized copying, modification, distribution, or use of this software is strictly prohibited. 
+For licensing inquiries, please contact legal@deploy-ai.com.
+
+See the [LICENSE](LICENSE) file for full terms and conditions.
 
 ## 🙏 Acknowledgments
 

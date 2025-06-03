@@ -2,6 +2,7 @@
   "name": "deploy-ai-frontend",
   "version": "1.1.1",
   "private": true,
+  "license": "proprietary",
   "dependencies": {
     "@heroicons/react": "^2.0.18",
     "@testing-library/jest-dom": "^6.6.3",
