@@ -1,0 +1,52 @@
+{
+  "name": "deploy-ai-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@heroicons/react": "^2.0.18",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/prismjs": "^1.26.5",
+    "autoprefixer": "^10.4.21",
+    "axios": "^1.6.0",
+    "classnames": "^2.3.2",
+    "jwt-decode": "^4.0.0",
+    "lucide-react": "^0.511.0",
+    "postcss": "^8.5.4",
+    "prismjs": "^1.30.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-hook-form": "^7.47.0",
+    "react-hot-toast": "^2.4.1",
+    "react-query": "^3.39.3",
+    "react-router-dom": "^6.18.0",
+    "reactflow": "^11.10.1",
+    "web-vitals": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.37",
+    "@types/react-dom": "^18.2.15",
+    "react-scripts": "5.0.1",
+    "tailwindcss": "^3.3.5",
+    "typescript": "^4.9.5"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test"
+  },
+  "proxy": "http://localhost:3001",
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}

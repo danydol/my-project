@@ -1,0 +1,221 @@
+// Prisma schema for Deploy.AI platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User management
+model User {
+  id                  String    @id @default(cuid())
+  username            String    @unique
+  email               String    @unique
+  displayName         String?
+  avatar              String?
+  githubId            String    @unique
+  githubAccessToken   String?   // encrypted
+  githubRefreshToken  String?   // encrypted
+  provider            String    @default("github")
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  repositories        Repository[]
+  deployments         Deployment[]
+  analytics           Analytics[]
+  settings            UserSettings?
+
+  @@index([username])
+  @@index([email])
+  @@index([githubId])
+  @@map("users")
+}
+
+// GitHub repositories connected to the platform
+model Repository {
+  id              String    @id @default(cuid())
+  userId          String
+  githubId        String    @unique
+  name            String
+  fullName        String    // owner/repo format
+  description     String?
+  isPrivate       Boolean   @default(false)
+  defaultBranch   String    @default("main")
+  cloneUrl        String
+  sshUrl          String?
+  lastAnalyzed    DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses        RepositoryAnalysis[]
+  infrastructures Infrastructure[]
+  deployments     Deployment[]
+  analytics       Analytics[]
+
+  @@index([userId])
+  @@index([githubId])
+  @@index([fullName])
+  @@map("repositories")
+}
+
+// AI-powered repository analysis results
+model RepositoryAnalysis {
+  id                            String    @id @default(cuid())
+  repositoryId                  String
+  analysisType                  String    // 'initial', 'updated', 'manual'
+  techStack                     Json      // Array of technologies detected
+  microservices                 Json      // Array of microservices identified
+  dockerConfigs                 Json      // Docker-related configurations
+  ciWorkflows                   Json      // CI/CD workflows detected
+  infrastructureRecommendations Json      // AI recommendations for infrastructure
+  dependencies                  Json      // Dependencies by service/component
+  analysisProvider              String    // 'openai', 'anthropic'
+  confidence                    Float     @default(0.0)
+  prompt                        String?   // The prompt used for analysis
+  rawResponse                   String?   // Raw LLM response
+  processingTime                Int?      // Analysis time in milliseconds
+  createdAt                     DateTime  @default(now())
+
+  // Relations
+  repository                    Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([repositoryId])
+  @@index([analysisType])
+  @@map("repository_analyses")
+}
+
+// Generated infrastructure configurations
+model Infrastructure {
+  id              String    @id @default(cuid())
+  repositoryId    String
+  type            String    // 'terraform', 'helm', 'argocd'
+  name            String    // Human-readable name
+  config          String    // Generated configuration content
+  version         String    @default("1.0.0")
+  status          String    @default("generated") // 'generated', 'applied', 'failed'
+  awsRegion       String?
+  clusterName     String?
+  namespace       String?
+  gitopsRepoUrl   String?
+  gitopsPath      String?   // Path within GitOps repo
+  metadata        Json?     // Additional metadata
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  repository      Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  deployments     Deployment[]
+
+  @@index([repositoryId])
+  @@index([type])
+  @@index([status])
+  @@map("infrastructures")
+}
+
+// Deployment tracking and management
+model Deployment {
+  id                String    @id @default(cuid())
+  userId            String
+  repositoryId      String
+  infrastructureId  String?
+  name              String    // Deployment name
+  status            String    @default("pending") // 'pending', 'deploying', 'deployed', 'failed', 'destroyed'
+  environment       String    // 'dev', 'staging', 'prod'
+  deploymentUrl     String?   // URL where app is accessible
+  eksClusterName    String?
+  namespace         String?
+  helmReleaseName   String?
+  terraformState    String?   // Terraform state identifier
+  gitCommitSha      String?   // Git commit that triggered deployment
+  buildNumber       String?
+  logs              String?   // Deployment logs
+  errorMessage      String?   // Error details if failed
+  deployedAt        DateTime?
+  destroyedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository        Repository     @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  infrastructure    Infrastructure? @relation(fields: [infrastructureId], references: [id])
+  resourceUsage     ResourceUsage[]
+
+  @@index([userId])
+  @@index([repositoryId])
+  @@index([status])
+  @@index([environment])
+  @@map("deployments")
+}
+
+// Platform usage analytics and event tracking
+model Analytics {
+  id           String    @id @default(cuid())
+  userId       String?
+  repositoryId String?
+  event        String    // 'repository_connected', 'analysis_completed', 'deployment_started', etc.
+  metadata     Json?     // Event-specific data
+  userAgent    String?
+  ipAddress    String?
+  sessionId    String?
+  timestamp    DateTime  @default(now())
+
+  // Relations
+  user         User?      @relation(fields: [userId], references: [id])
+  repository   Repository? @relation(fields: [repositoryId], references: [id])
+
+  @@index([userId])
+  @@index([event])
+  @@index([timestamp])
+  @@map("analytics")
+}
+
+// Resource usage and cost tracking
+model ResourceUsage {
+  id           String    @id @default(cuid())
+  deploymentId String
+  cpuUsage     Float?    // CPU usage percentage
+  memoryUsage  Float?    // Memory usage in MB
+  networkIO    BigInt?   // Network I/O in bytes
+  storageUsage BigInt?   // Storage usage in bytes
+  cost         Decimal?  @db.Decimal(10, 4) // Cost in USD
+  region       String?
+  instanceType String?
+  timestamp    DateTime  @default(now())
+
+  // Relations
+  deployment   Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentId])
+  @@index([timestamp])
+  @@map("resource_usage")
+}
+
+// User settings and preferences
+model UserSettings {
+  id                    String    @id @default(cuid())
+  userId                String    @unique
+  awsCredentials        Json?     // Encrypted AWS credentials
+  preferredRegion       String    @default("us-east-1")
+  defaultEnvironment    String    @default("dev")
+  notificationSettings  Json?     // Email, Slack, etc. preferences
+  gitopsSettings        Json?     // GitOps repository preferences
+  deploymentPreferences Json?     // Default deployment settings
+  theme                 String    @default("light")
+  timezone              String    @default("UTC")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+} 
