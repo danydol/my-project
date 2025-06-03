@@ -1,6 +1,6 @@
 {
   "name": "deploy-ai-frontend",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "dependencies": {
     "@heroicons/react": "^2.0.18",

@@ -1,9 +1,13 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## 1.1.0 (2025-06-03)
+
+
+### Features
+
+* **versioning:** add semantic versioning system with automated releases and docs ([3a359de](https://github.com/izzywdev/deployai/commit/3a359deaed35c584fb3053057128f671746551e7))
 
 ## [1.0.0] - 2025-01-24
 
