@@ -182,6 +182,45 @@ Deploy.AI generates:
 - **Docker configurations**
 - **ArgoCD applications**
 
+## 📋 Semantic Versioning
+
+Deploy.AI uses [Semantic Versioning (SemVer)](https://semver.org/) with automated release management:
+
+### Quick Release Commands
+```bash
+# Patch release (bug fixes): 1.0.0 → 1.0.1
+npm run release:patch
+
+# Minor release (new features): 1.0.0 → 1.1.0
+npm run release:minor
+
+# Major release (breaking changes): 1.0.0 → 2.0.0
+npm run release:major
+
+# Auto-detect based on conventional commits
+npm run release
+```
+
+### Conventional Commits
+```bash
+# Use interactive commit helper
+npm run commit
+
+# Or format manually
+git commit -m "feat(chat): add message encryption"
+git commit -m "fix(auth): resolve token expiration issue"
+git commit -m "docs: update deployment guide"
+```
+
+### What Happens Automatically
+- ✅ Version bumped across all `package.json` files
+- ✅ `CHANGELOG.md` updated with new features and fixes
+- ✅ Git tag created (`v1.1.0`)
+- ✅ Docker image labels updated
+- ✅ Release commit created and pushed
+
+For detailed versioning guidelines, see [VERSIONING.md](VERSIONING.md).
+
 ## 🛠️ Tech Stack
 
 ### Frontend
