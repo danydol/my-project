@@ -69,6 +69,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const fetchUser = async () => {
     try {
+      // Use relative URL - axios base configuration will handle this
       const response = await axios.get('/api/auth/me');
       setUser(response.data.user);
     } catch (error) {
@@ -101,6 +102,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const refreshToken = async () => {
     try {
+      // Use relative URL
       const response = await axios.post('/api/auth/refresh');
       const newToken = response.data.token;
       login(newToken);

@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3005';
+// Use relative URLs so requests go through the same ngrok tunnel
+const API_BASE_URL = '';
 
 export const apiClient = axios.create({
   baseURL: `${API_BASE_URL}/api`,

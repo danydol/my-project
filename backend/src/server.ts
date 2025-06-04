@@ -5,12 +5,14 @@ import dotenv from 'dotenv';
 import passport from 'passport';
 import rateLimit from 'express-rate-limit';
 import swaggerUi from 'swagger-ui-express';
+import path from 'path';
 
 // Import routes
 import authRoutes from './routes/auth';
 import githubRoutes from './routes/github';
 import awsRoutes from './routes/aws';
 import repositoryRoutes from './routes/repository';
+import projectRoutes from './routes/project';
 import deploymentRoutes from './routes/deployment';
 import infrastructureRoutes from './routes/infrastructure';
 import analyticsRoutes from './routes/analytics';
@@ -29,6 +31,9 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Trust proxy (needed for ngrok and reverse proxies)
+app.set('trust proxy', true);
 
 // Security middleware
 app.use(helmet());
@@ -113,20 +118,32 @@ app.use('/api/auth', authRoutes);
 app.use('/api/github', githubRoutes);
 app.use('/api/aws', awsRoutes);
 app.use('/api/repositories', repositoryRoutes);
+app.use('/api/projects', projectRoutes);
 app.use('/api/deployments', deploymentRoutes);
 app.use('/api/infrastructure', infrastructureRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/chat', chatRoutes);
 
+// Serve static files from frontend build (for production)
+const frontendBuildPath = path.join(__dirname, '../frontend/build');
+app.use(express.static(frontendBuildPath));
+
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    error: 'Route not found',
-    path: req.originalUrl
-  });
+// Serve frontend for all non-API routes (SPA fallback)
+app.get('*', (req, res) => {
+  // Don't serve frontend for API routes that don't exist
+  if (req.path.startsWith('/api/')) {
+    res.status(404).json({
+      error: 'Route not found',
+      path: req.originalUrl
+    });
+    return;
+  }
+  
+  // Serve frontend index.html for all other routes
+  res.sendFile(path.join(frontendBuildPath, 'index.html'));
 });
 
 // Start server

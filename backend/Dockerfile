@@ -9,8 +9,8 @@ RUN apk add --no-cache openssl python3 make g++
 WORKDIR /app
 
 # Copy package files first (for better caching)
-COPY package*.json ./
-COPY prisma ./prisma/
+COPY backend/package*.json ./
+COPY backend/prisma ./prisma/
 
 # Install dependencies
 RUN npm ci --include=dev
@@ -22,7 +22,7 @@ RUN npm run prisma:generate
 FROM dependencies AS builder
 
 # Copy source code
-COPY . .
+COPY backend/ .
 
 # Build the application
 RUN npm run build
@@ -30,7 +30,20 @@ RUN npm run build
 # Remove dev dependencies
 RUN npm ci --only=production && npm cache clean --force
 
-# Stage 3: Production stage
+# Stage 3: Frontend build stage
+FROM node:18-alpine AS frontend-builder
+
+WORKDIR /frontend
+
+# Copy frontend files
+COPY frontend/package*.json ./
+RUN npm ci
+
+# Copy frontend source and build
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 4: Production stage
 FROM node:18-alpine AS production
 
 # Install runtime dependencies
@@ -49,8 +62,14 @@ COPY --from=builder --chown=deployai:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=deployai:nodejs /app/package*.json ./
 COPY --from=builder --chown=deployai:nodejs /app/prisma ./prisma
 
+# Copy frontend build files
+COPY --from=frontend-builder --chown=deployai:nodejs /frontend/build ./frontend/build
+
 # Copy health check script
-COPY --chown=deployai:nodejs healthcheck.js ./
+COPY --chown=deployai:nodejs backend/healthcheck.js ./
+
+# Create logs directory with proper permissions
+RUN mkdir -p logs && chown deployai:nodejs logs
 
 # Switch to non-root user
 USER deployai
