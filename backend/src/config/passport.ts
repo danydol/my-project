@@ -36,18 +36,44 @@ export const setupPassport = (): void => {
   },
   async (accessToken: string, refreshToken: string, profile: GitHubProfile, done: Function) => {
     try {
-      logger.info('GitHub OAuth callback received', { username: profile.username });
+      logger.info('GitHub OAuth callback received', { username: profile.username, profileId: profile.id });
       
       const githubId = profile.id;
       const username = profile.username || profile._json.login;
-      const email = profile.emails?.[0]?.value || profile._json.email;
+      let email = profile.emails?.[0]?.value || profile._json.email;
       const displayName = profile.displayName || profile._json.name;
       const avatar = profile.photos?.[0]?.value || profile._json.avatar_url;
 
+      // Try to get email from GitHub API if not in profile (but don't require it)
       if (!email) {
-        logger.error('GitHub profile missing email', { username });
-        return done(new Error('GitHub profile must have a public email address'), null);
+        try {
+          logger.info('Email not found in profile, trying GitHub API', { username });
+          const response = await fetch('https://api.github.com/user/emails', {
+            headers: {
+              'Authorization': `token ${accessToken}`,
+              'User-Agent': 'DeployAI-App'
+            }
+          });
+          
+          if (response.ok) {
+            const emails = await response.json() as Array<{ email: string; primary: boolean; verified: boolean }>;
+            const primaryEmail = emails.find((e: any) => e.primary);
+            email = primaryEmail?.email;
+            logger.info('GitHub API email fetch result', { username, emailFound: !!email });
+          } else {
+            logger.warn('GitHub API email fetch failed', { 
+              username, 
+              status: response.status, 
+              statusText: response.statusText 
+            });
+          }
+        } catch (apiError) {
+          logger.warn('Error fetching emails from GitHub API', { username, error: apiError });
+        }
       }
+
+      // Email is now optional - we proceed with or without it
+      logger.info('Processing GitHub OAuth', { username, hasEmail: !!email, githubId });
 
       // Check if user already exists
       let user = await databaseService.findUserByGithubId(githubId);
@@ -59,6 +85,7 @@ export const setupPassport = (): void => {
           githubRefreshToken: refreshToken,
           avatar,
           displayName,
+          email: email || user.email, // Keep existing email if new one not found
           isActive: true,
         });
         
@@ -70,10 +97,10 @@ export const setupPassport = (): void => {
         
         logger.info('Existing user logged in', { userId: user.id, username: user.username });
       } else {
-        // Create new user
+        // Create new user (email is now optional)
         user = await databaseService.createUser({
           username,
-          email,
+          email: email || null, // Email can be null
           githubId,
           displayName,
           avatar,
@@ -87,7 +114,7 @@ export const setupPassport = (): void => {
           username: user.username,
         });
         
-        logger.info('New user registered', { userId: user.id, username: user.username });
+        logger.info('New user registered', { userId: user.id, username: user.username, hasEmail: !!email });
       }
       
       return done(null, user);

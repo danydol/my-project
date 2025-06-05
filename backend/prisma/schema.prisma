@@ -13,7 +13,7 @@ datasource db {
 model User {
   id                  String    @id @default(cuid())
   username            String    @unique
-  email               String    @unique
+  email               String?   @unique
   displayName         String?
   avatar              String?
   githubId            String    @unique
@@ -25,6 +25,7 @@ model User {
   updatedAt           DateTime  @updatedAt
 
   // Relations
+  projects            Project[]
   repositories        Repository[]
   deployments         Deployment[]
   analytics           Analytics[]
@@ -36,10 +37,81 @@ model User {
   @@map("users")
 }
 
+// Project management - groups repositories and manages multi-cloud deployments
+model Project {
+  id                  String    @id @default(cuid())
+  name                String
+  description         String?
+  slug                String    @unique
+  userId              String
+  
+  // Project settings
+  defaultEnvironments String[]  @default(["dev", "staging", "prod"])
+  multiCloud          Boolean   @default(false)
+  status              String    @default("active") // 'active', 'archived', 'suspended'
+  
+  // Metadata
+  tags                String[]  @default([])
+  icon                String?   // Project icon/avatar
+  color               String?   // Project theme color
+  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repositories        Repository[]
+  deployments         Deployment[]
+  infrastructures     Infrastructure[]
+  cloudConnections    CloudConnection[]
+  analytics           Analytics[]
+
+  @@index([userId])
+  @@index([slug])
+  @@index([status])
+  @@map("projects")
+}
+
+// Multi-cloud connection management
+model CloudConnection {
+  id                  String    @id @default(cuid())
+  projectId           String
+  provider            String    // 'aws', 'gcp', 'azure'
+  name                String    // User-friendly name
+  
+  // Connection status
+  status              String    @default("pending") // 'pending', 'connected', 'error', 'expired'
+  lastValidated       DateTime?
+  errorMessage        String?
+  
+  // Provider-specific configuration (encrypted)
+  config              Json      // Encrypted credentials and settings
+  region              String?   // Default region for this connection
+  
+  // Metadata
+  description         String?
+  tags                String[]  @default([])
+  isDefault           Boolean   @default(false)
+  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  project             Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deployments         Deployment[]
+
+  @@index([projectId])
+  @@index([provider])
+  @@index([status])
+  @@unique([projectId, name])
+  @@map("cloud_connections")
+}
+
 // GitHub repositories connected to the platform
 model Repository {
   id              String    @id @default(cuid())
   userId          String
+  projectId       String?   // Optional - can be standalone or part of project
   githubId        String    @unique
   name            String
   fullName        String    // owner/repo format
@@ -55,12 +127,14 @@ model Repository {
 
   // Relations
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project         Project?  @relation(fields: [projectId], references: [id])
   analyses        RepositoryAnalysis[]
   infrastructures Infrastructure[]
   deployments     Deployment[]
   analytics       Analytics[]
 
   @@index([userId])
+  @@index([projectId])
   @@index([githubId])
   @@index([fullName])
   @@map("repositories")
@@ -96,6 +170,7 @@ model RepositoryAnalysis {
 model Infrastructure {
   id              String    @id @default(cuid())
   repositoryId    String
+  projectId       String?   // Optional - for project-level infrastructure
   type            String    // 'terraform', 'helm', 'argocd'
   name            String    // Human-readable name
   config          String    // Generated configuration content
@@ -112,9 +187,11 @@ model Infrastructure {
 
   // Relations
   repository      Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  project         Project?   @relation(fields: [projectId], references: [id])
   deployments     Deployment[]
 
   @@index([repositoryId])
+  @@index([projectId])
   @@index([type])
   @@index([status])
   @@map("infrastructures")
@@ -125,10 +202,13 @@ model Deployment {
   id                String    @id @default(cuid())
   userId            String
   repositoryId      String
+  projectId         String?   // Can deploy entire project or single repo
   infrastructureId  String?
+  cloudConnectionId String?   // Reference to cloud connection used
   name              String    // Deployment name
   status            String    @default("pending") // 'pending', 'deploying', 'deployed', 'failed', 'destroyed'
   environment       String    // 'dev', 'staging', 'prod'
+  provider          String?   // 'aws', 'gcp', 'azure'
   deploymentUrl     String?   // URL where app is accessible
   eksClusterName    String?
   namespace         String?
@@ -146,13 +226,18 @@ model Deployment {
   // Relations
   user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   repository        Repository     @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  project           Project?       @relation(fields: [projectId], references: [id])
   infrastructure    Infrastructure? @relation(fields: [infrastructureId], references: [id])
+  cloudConnection   CloudConnection? @relation(fields: [cloudConnectionId], references: [id])
   resourceUsage     ResourceUsage[]
 
   @@index([userId])
   @@index([repositoryId])
+  @@index([projectId])
+  @@index([cloudConnectionId])
   @@index([status])
   @@index([environment])
+  @@index([provider])
   @@map("deployments")
 }
 
@@ -161,6 +246,7 @@ model Analytics {
   id           String    @id @default(cuid())
   userId       String?
   repositoryId String?
+  projectId    String?   // Track project-level events
   event        String    // 'repository_connected', 'analysis_completed', 'deployment_started', etc.
   metadata     Json?     // Event-specific data
   userAgent    String?
@@ -171,8 +257,10 @@ model Analytics {
   // Relations
   user         User?      @relation(fields: [userId], references: [id])
   repository   Repository? @relation(fields: [repositoryId], references: [id])
+  project      Project?   @relation(fields: [projectId], references: [id])
 
   @@index([userId])
+  @@index([projectId])
   @@index([event])
   @@index([timestamp])
   @@map("analytics")

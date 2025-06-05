@@ -16,9 +16,8 @@ interface HelpPageProps {
 }
 
 const HelpPage: React.FC<HelpPageProps> = ({ onBack }) => {
-  const API_DOCS_URL = process.env.REACT_APP_API_URL ? 
-    `${process.env.REACT_APP_API_URL}/api-docs` : 
-    'http://localhost:3005/api-docs';
+  // Use relative URL for API docs
+  const API_DOCS_URL = '/api-docs';
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">

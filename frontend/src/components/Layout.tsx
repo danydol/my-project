@@ -11,6 +11,7 @@ import {
   XMarkIcon,
   UserCircleIcon,
   ArrowRightOnRectangleIcon,
+  RectangleGroupIcon,
 } from '@heroicons/react/24/outline';
 import { MessageSquare, HelpCircle } from 'lucide-react';
 import ChatPanel from './ChatPanel/ChatPanel';
@@ -30,6 +31,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
+    { name: 'Projects', href: '/projects', icon: RectangleGroupIcon },
     { name: 'Repositories', href: '/repositories', icon: FolderIcon },
     { name: 'Deployments', href: '/deployments', icon: CloudIcon },
     { name: 'Analytics', href: '/analytics', icon: ChartBarIcon },

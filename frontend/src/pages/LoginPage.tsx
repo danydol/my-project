@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 
 const LoginPage: React.FC = () => {
   const handleGitHubLogin = () => {
-    const backendUrl = process.env.REACT_APP_API_URL || 'http://localhost:3005';
-    window.location.href = `${backendUrl}/api/auth/github`;
+    // Use relative URL so it goes through the same ngrok tunnel
+    window.location.href = `/api/auth/github`;
   };
 
   return (

@@ -11,6 +11,55 @@ router.get('/github', passport.authenticate('github', {
   scope: ['user:email', 'repo', 'admin:repo_hook']
 }));
 
+// GitHub OAuth re-authentication (forces fresh consent)
+router.get('/github/reauth', async (req: any, res) => {
+  try {
+    const user = req.user;
+    
+    // Clear GitHub tokens from database first
+    if (user) {
+      const { PrismaClient } = require('@prisma/client');
+      const prisma = new PrismaClient();
+      
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          githubAccessToken: null,
+          githubRefreshToken: null
+        }
+      });
+      
+      await prisma.$disconnect();
+      logger.info('GitHub tokens cleared for re-authentication', { userId: user.id });
+    }
+    
+    // Force fresh GitHub OAuth flow
+    const clientId = process.env.GITHUB_CLIENT_ID;
+    const redirectUri = encodeURIComponent(process.env.GITHUB_CALLBACK_URL!);
+    const scopes = encodeURIComponent('user:email repo admin:repo_hook');
+    const state = Math.random().toString(36).substring(7); // random state for security
+    
+    // GitHub OAuth URL with force approval
+    const githubAuthUrl = `https://github.com/login/oauth/authorize?` +
+      `client_id=${clientId}&` +
+      `redirect_uri=${redirectUri}&` +
+      `scope=${scopes}&` +
+      `state=${state}&` +
+      `prompt=consent&` +         // Force consent screen
+      `allow_signup=true`;
+    
+    logger.info('Redirecting to GitHub for fresh authentication', { userId: user?.id || 'unknown' });
+    res.redirect(githubAuthUrl);
+    
+  } catch (error) {
+    logger.error('Error during GitHub re-authentication', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to initiate re-authentication'
+    });
+  }
+});
+
 // GitHub OAuth callback
 router.get('/github/callback', 
   passport.authenticate('github', { session: false }),
@@ -81,6 +130,40 @@ router.post('/refresh', passport.authenticate('jwt', { session: false }), (req: 
     res.status(500).json({
       success: false,
       error: 'Failed to refresh token'
+    });
+  }
+});
+
+// Clear GitHub token and force re-authentication
+router.post('/github/disconnect', passport.authenticate('jwt', { session: false }), async (req: any, res) => {
+  try {
+    const user = req.user;
+    
+    // Clear GitHub tokens from database
+    const { PrismaClient } = require('@prisma/client');
+    const prisma = new PrismaClient();
+    
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        githubAccessToken: null,
+        githubRefreshToken: null
+      }
+    });
+    
+    await prisma.$disconnect();
+    
+    logger.info('GitHub tokens cleared for re-authentication', { userId: user.id });
+    
+    res.json({
+      success: true,
+      message: 'GitHub tokens cleared. Please re-authenticate.'
+    });
+  } catch (error) {
+    logger.error('Error clearing GitHub tokens', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to clear GitHub tokens'
     });
   }
 });
