@@ -2,9 +2,20 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
+import ProjectsPage from './pages/ProjectsPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
+
+// Wrapper component to avoid repetition
+const ProtectedLayoutRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <ProtectedRoute>
+    <Layout>
+      {children}
+    </Layout>
+  </ProtectedRoute>
+);
 
 function App() {
   const { isAuthenticated, loading } = useAuth();
@@ -28,12 +39,13 @@ function App() {
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
         
         {/* Protected routes */}
-        <Route path="/" element={<ProtectedRoute><Navigate to="/dashboard" replace /></ProtectedRoute>} />
-        <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-        <Route path="/repositories" element={<ProtectedRoute><div className="p-6"><h1 className="text-2xl font-bold">Repositories</h1><p>Coming soon...</p></div></ProtectedRoute>} />
-        <Route path="/deployments" element={<ProtectedRoute><div className="p-6"><h1 className="text-2xl font-bold">Deployments</h1><p>Coming soon...</p></div></ProtectedRoute>} />
-        <Route path="/analytics" element={<ProtectedRoute><div className="p-6"><h1 className="text-2xl font-bold">Analytics</h1><p>Coming soon...</p></div></ProtectedRoute>} />
-        <Route path="/settings" element={<ProtectedRoute><div className="p-6"><h1 className="text-2xl font-bold">Settings</h1><p>Coming soon...</p></div></ProtectedRoute>} />
+        <Route path="/" element={<ProtectedLayoutRoute><Navigate to="/dashboard" replace /></ProtectedLayoutRoute>} />
+        <Route path="/dashboard" element={<ProtectedLayoutRoute><DashboardPage /></ProtectedLayoutRoute>} />
+        <Route path="/projects" element={<ProtectedLayoutRoute><ProjectsPage /></ProtectedLayoutRoute>} />
+        <Route path="/repositories" element={<ProtectedLayoutRoute><div className="p-6"><h1 className="text-2xl font-bold">Repositories</h1><p>Coming soon...</p></div></ProtectedLayoutRoute>} />
+        <Route path="/deployments" element={<ProtectedLayoutRoute><div className="p-6"><h1 className="text-2xl font-bold">Deployments</h1><p>Coming soon...</p></div></ProtectedLayoutRoute>} />
+        <Route path="/analytics" element={<ProtectedLayoutRoute><div className="p-6"><h1 className="text-2xl font-bold">Analytics</h1><p>Coming soon...</p></div></ProtectedLayoutRoute>} />
+        <Route path="/settings" element={<ProtectedLayoutRoute><div className="p-6"><h1 className="text-2xl font-bold">Settings</h1><p>Coming soon...</p></div></ProtectedLayoutRoute>} />
       </Routes>
     </div>
   );

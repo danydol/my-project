@@ -10,14 +10,15 @@ const router = express.Router();
 const requireAuth = passport.authenticate('jwt', { session: false });
 
 // Validation middleware
-const handleValidationErrors = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+const handleValidationErrors = (req: express.Request, res: express.Response, next: express.NextFunction): void => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
       error: 'Validation failed',
       details: errors.array()
     });
+    return;
   }
   next();
 };
@@ -117,7 +118,7 @@ router.post('/',
     body('tags').optional().isArray().withMessage('Tags must be an array'),
   ],
   handleValidationErrors,
-  async (req: any, res) => {
+  async (req: any, res: express.Response) => {
     try {
       const project = await databaseService.createProject({
         userId: req.user.id,
@@ -128,6 +129,7 @@ router.post('/',
         success: true,
         project
       });
+      return;
     } catch (error: any) {
       logger.error('Error creating project', { error, userId: req.user?.id });
       
@@ -142,6 +144,7 @@ router.post('/',
         success: false,
         error: 'Failed to create project'
       });
+      return;
     }
   }
 );
@@ -170,7 +173,7 @@ router.get('/:id',
   requireAuth,
   [param('id').isString().withMessage('Invalid project ID')],
   handleValidationErrors,
-  async (req: any, res) => {
+  async (req: any, res: express.Response) => {
     try {
       const project = await databaseService.findProjectById(req.params.id);
       
@@ -193,12 +196,14 @@ router.get('/:id',
         success: true,
         project
       });
+      return;
     } catch (error) {
       logger.error('Error fetching project', { error, projectId: req.params.id });
       res.status(500).json({
         success: false,
         error: 'Failed to fetch project'
       });
+      return;
     }
   }
 );
@@ -259,7 +264,7 @@ router.put('/:id',
     body('tags').optional().isArray().withMessage('Tags must be an array'),
   ],
   handleValidationErrors,
-  async (req: any, res) => {
+  async (req: any, res: express.Response) => {
     try {
       // Verify project ownership
       const existingProject = await databaseService.findProjectById(req.params.id);
@@ -276,12 +281,14 @@ router.put('/:id',
         success: true,
         project
       });
+      return;
     } catch (error) {
       logger.error('Error updating project', { error, projectId: req.params.id });
       res.status(500).json({
         success: false,
         error: 'Failed to update project'
       });
+      return;
     }
   }
 );
@@ -308,7 +315,7 @@ router.get('/:id/cloud-connections',
   requireAuth,
   [param('id').isString().withMessage('Invalid project ID')],
   handleValidationErrors,
-  async (req: any, res) => {
+  async (req: any, res: express.Response) => {
     try {
       // Verify project ownership
       const project = await databaseService.findProjectById(req.params.id);
@@ -325,12 +332,14 @@ router.get('/:id/cloud-connections',
         success: true,
         connections
       });
+      return;
     } catch (error) {
       logger.error('Error fetching cloud connections', { error, projectId: req.params.id });
       res.status(500).json({
         success: false,
         error: 'Failed to fetch cloud connections'
       });
+      return;
     }
   }
 );
@@ -394,7 +403,7 @@ router.post('/:id/cloud-connections',
     body('isDefault').optional().isBoolean().withMessage('isDefault must be a boolean'),
   ],
   handleValidationErrors,
-  async (req: any, res) => {
+  async (req: any, res: express.Response) => {
     try {
       // Verify project ownership
       const project = await databaseService.findProjectById(req.params.id);
@@ -414,6 +423,7 @@ router.post('/:id/cloud-connections',
         success: true,
         connection
       });
+      return;
     } catch (error: any) {
       logger.error('Error creating cloud connection', { error, projectId: req.params.id });
       
@@ -428,6 +438,235 @@ router.post('/:id/cloud-connections',
         success: false,
         error: 'Failed to create cloud connection'
       });
+      return;
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/projects/{id}/repositories:
+ *   get:
+ *     summary: Get repositories in a project
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Project repositories retrieved successfully
+ */
+router.get('/:id/repositories', 
+  requireAuth,
+  [param('id').isString().withMessage('Invalid project ID')],
+  handleValidationErrors,
+  async (req: any, res: express.Response) => {
+    try {
+      const project = await databaseService.findProjectById(req.params.id);
+      
+      if (!project) {
+        return res.status(404).json({
+          success: false,
+          error: 'Project not found'
+        });
+      }
+
+      // Check if user owns the project
+      if (project.userId !== req.user.id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied'
+        });
+      }
+
+      const repositories = await databaseService.getProjectRepositories(req.params.id);
+
+      res.json({
+        success: true,
+        repositories
+      });
+      return;
+    } catch (error) {
+      logger.error('Error fetching project repositories', { error, projectId: req.params.id });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch project repositories'
+      });
+      return;
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/projects/{id}/repositories:
+ *   post:
+ *     summary: Add existing repository to project
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - repositoryId
+ *             properties:
+ *               repositoryId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Repository added to project successfully
+ */
+router.post('/:id/repositories', 
+  requireAuth,
+  [
+    param('id').isString().withMessage('Invalid project ID'),
+    body('repositoryId').isString().withMessage('Repository ID is required')
+  ],
+  handleValidationErrors,
+  async (req: any, res: express.Response) => {
+    try {
+      const project = await databaseService.findProjectById(req.params.id);
+      
+      if (!project) {
+        return res.status(404).json({
+          success: false,
+          error: 'Project not found'
+        });
+      }
+
+      // Check if user owns the project
+      if (project.userId !== req.user.id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied'
+        });
+      }
+
+      // Check if repository exists and user owns it
+      const repository = await databaseService.findRepositoryById(req.body.repositoryId);
+      if (!repository) {
+        return res.status(404).json({
+          success: false,
+          error: 'Repository not found'
+        });
+      }
+
+      if (repository.userId !== req.user.id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied to repository'
+        });
+      }
+
+      // Add repository to project
+      const updatedRepository = await databaseService.addRepositoryToProject(
+        req.body.repositoryId, 
+        req.params.id
+      );
+
+      res.json({
+        success: true,
+        repository: updatedRepository
+      });
+      return;
+    } catch (error: any) {
+      logger.error('Error adding repository to project', { error, projectId: req.params.id });
+      
+      if (error.code === 'P2002') {
+        return res.status(409).json({
+          success: false,
+          error: 'Repository is already in this project'
+        });
+      }
+      
+      res.status(500).json({
+        success: false,
+        error: 'Failed to add repository to project'
+      });
+      return;
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/projects/{id}/repositories/{repoId}:
+ *   delete:
+ *     summary: Remove repository from project
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: repoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Repository removed from project successfully
+ */
+router.delete('/:id/repositories/:repoId', 
+  requireAuth,
+  [
+    param('id').isString().withMessage('Invalid project ID'),
+    param('repoId').isString().withMessage('Invalid repository ID')
+  ],
+  handleValidationErrors,
+  async (req: any, res: express.Response) => {
+    try {
+      const project = await databaseService.findProjectById(req.params.id);
+      
+      if (!project) {
+        return res.status(404).json({
+          success: false,
+          error: 'Project not found'
+        });
+      }
+
+      // Check if user owns the project
+      if (project.userId !== req.user.id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied'
+        });
+      }
+
+      // Remove repository from project (set projectId to null)
+      const updatedRepository = await databaseService.removeRepositoryFromProject(req.params.repoId);
+
+      res.json({
+        success: true,
+        repository: updatedRepository
+      });
+      return;
+    } catch (error) {
+      logger.error('Error removing repository from project', { error, projectId: req.params.id });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to remove repository from project'
+      });
+      return;
     }
   }
 );

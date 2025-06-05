@@ -95,7 +95,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onEdit, onDelete }) 
     }
   };
 
-  const connectedProviders = [...new Set(project.cloudConnections.map(c => c.provider))];
+  const connectedProviders = Array.from(new Set(project.cloudConnections.map(c => c.provider)));
   const activeConnections = project.cloudConnections.filter(c => c.status === 'connected').length;
   const connectionHealthPercentage = project.cloudConnections.length > 0 
     ? (activeConnections / project.cloudConnections.length) * 100 

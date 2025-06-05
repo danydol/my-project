@@ -289,6 +289,101 @@ class DatabaseService {
     }
   }
 
+  async getProject(projectId: string, userId: string): Promise<Project | null> {
+    try {
+      return await this.prisma.project.findFirst({
+        where: { 
+          id: projectId,
+          userId,
+        },
+        include: {
+          repositories: true,
+          cloudConnections: true,
+        },
+      });
+    } catch (error) {
+      logger.error('Error fetching project', error);
+      throw error;
+    }
+  }
+
+  async getCloudConnections(projectId: string): Promise<CloudConnection[]> {
+    try {
+      return await this.prisma.cloudConnection.findMany({
+        where: { projectId },
+        orderBy: [
+          { isDefault: 'desc' },
+          { createdAt: 'desc' },
+        ],
+      });
+    } catch (error) {
+      logger.error('Error fetching cloud connections', error);
+      throw error;
+    }
+  }
+
+  async getCloudConnection(connectionId: string): Promise<CloudConnection | null> {
+    try {
+      return await this.prisma.cloudConnection.findUnique({
+        where: { id: connectionId },
+      });
+    } catch (error) {
+      logger.error('Error fetching cloud connection', error);
+      throw error;
+    }
+  }
+
+  async updateCloudConnection(connectionId: string, updateData: any): Promise<CloudConnection> {
+    try {
+      // If this is set as default, unset other defaults for this project/provider
+      if (updateData.isDefault) {
+        const connection = await this.prisma.cloudConnection.findUnique({
+          where: { id: connectionId },
+        });
+        
+        if (connection) {
+          await this.prisma.cloudConnection.updateMany({
+            where: {
+              projectId: connection.projectId,
+              provider: connection.provider,
+              id: { not: connectionId },
+            },
+            data: {
+              isDefault: false,
+            },
+          });
+        }
+      }
+
+      const updatedConnection = await this.prisma.cloudConnection.update({
+        where: { id: connectionId },
+        data: updateData,
+      });
+      
+      logger.info('Cloud connection updated', { 
+        connectionId,
+        fieldsUpdated: Object.keys(updateData)
+      });
+      return updatedConnection;
+    } catch (error) {
+      logger.error('Error updating cloud connection', error);
+      throw error;
+    }
+  }
+
+  async deleteCloudConnection(connectionId: string): Promise<void> {
+    try {
+      await this.prisma.cloudConnection.delete({
+        where: { id: connectionId },
+      });
+      
+      logger.info('Cloud connection deleted', { connectionId });
+    } catch (error) {
+      logger.error('Error deleting cloud connection', error);
+      throw error;
+    }
+  }
+
   // Repository operations
   async createRepository(repositoryData: {
     userId: string;
@@ -338,11 +433,134 @@ class DatabaseService {
             orderBy: { createdAt: 'desc' },
             take: 5,
           },
+          project: true, // Include project info
         },
         orderBy: { updatedAt: 'desc' },
       });
     } catch (error) {
       logger.error('Error fetching user repositories', error);
+      throw error;
+    }
+  }
+
+  async findRepositoryById(id: string): Promise<Repository | null> {
+    try {
+      return await this.prisma.repository.findUnique({
+        where: { id },
+        include: {
+          project: true,
+          analyses: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      });
+    } catch (error) {
+      logger.error('Error finding repository by ID', error);
+      throw error;
+    }
+  }
+
+  async getProjectRepositories(projectId: string): Promise<Repository[]> {
+    try {
+      return await this.prisma.repository.findMany({
+        where: { 
+          projectId,
+          isActive: true,
+        },
+        include: {
+          analyses: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+          deployments: {
+            where: { status: { in: ['deployed', 'deploying'] } },
+            orderBy: { createdAt: 'desc' },
+            take: 3,
+          },
+          _count: {
+            select: {
+              deployments: true,
+              infrastructures: true,
+            },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+    } catch (error) {
+      logger.error('Error fetching project repositories', error);
+      throw error;
+    }
+  }
+
+  async addRepositoryToProject(repositoryId: string, projectId: string): Promise<Repository> {
+    try {
+      const repository = await this.prisma.repository.update({
+        where: { id: repositoryId },
+        data: { projectId },
+        include: {
+          project: true,
+          analyses: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      logger.info('Repository added to project', { 
+        repositoryId, 
+        projectId,
+        repositoryName: repository.fullName 
+      });
+      return repository;
+    } catch (error) {
+      logger.error('Error adding repository to project', error);
+      throw error;
+    }
+  }
+
+  async removeRepositoryFromProject(repositoryId: string): Promise<Repository> {
+    try {
+      const repository = await this.prisma.repository.update({
+        where: { id: repositoryId },
+        data: { projectId: null },
+        include: {
+          analyses: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      logger.info('Repository removed from project', { 
+        repositoryId,
+        repositoryName: repository.fullName 
+      });
+      return repository;
+    } catch (error) {
+      logger.error('Error removing repository from project', error);
+      throw error;
+    }
+  }
+
+  async getUnassignedRepositories(userId: string): Promise<Repository[]> {
+    try {
+      return await this.prisma.repository.findMany({
+        where: { 
+          userId,
+          projectId: null, // Not assigned to any project
+          isActive: true,
+        },
+        include: {
+          analyses: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+    } catch (error) {
+      logger.error('Error fetching unassigned repositories', error);
       throw error;
     }
   }

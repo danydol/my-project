@@ -228,7 +228,7 @@ const CloudConnectionGrid: React.FC<CloudConnectionGridProps> = ({
                     className="add-connection-button"
                     onClick={() => onConnect(provider.id)}
                   >
-                    ➕ Add Another {provider.name} Connection
+                    + Add Connection
                   </button>
                 </div>
               )}

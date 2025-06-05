@@ -10,7 +10,7 @@ import path from 'path';
 // Import routes
 import authRoutes from './routes/auth';
 import githubRoutes from './routes/github';
-import awsRoutes from './routes/aws';
+import cloudRoutes from './routes/cloud';
 import repositoryRoutes from './routes/repository';
 import projectRoutes from './routes/project';
 import deploymentRoutes from './routes/deployment';
@@ -116,7 +116,7 @@ app.get('/health', async (req, res) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/github', githubRoutes);
-app.use('/api/aws', awsRoutes);
+app.use('/api/cloud', cloudRoutes);
 app.use('/api/repositories', repositoryRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/deployments', deploymentRoutes);
