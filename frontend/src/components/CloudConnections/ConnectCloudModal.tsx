@@ -84,7 +84,8 @@ const ConnectCloudModal: React.FC<ConnectCloudModalProps> = ({
     try {
       const response = await fetch(`/api/cloud/providers/${provider}/regions`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'ngrok-skip-browser-warning': 'any'
         }
       });
       
@@ -118,7 +119,8 @@ const ConnectCloudModal: React.FC<ConnectCloudModalProps> = ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'ngrok-skip-browser-warning': 'any'
         },
         body: JSON.stringify({
           provider,

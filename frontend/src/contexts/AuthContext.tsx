@@ -37,6 +37,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (token) {
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     }
+    // Add ngrok header to skip browser warning
+    axios.defaults.headers.common['ngrok-skip-browser-warning'] = 'any';
   }, []);
 
   // Check for existing token on mount
