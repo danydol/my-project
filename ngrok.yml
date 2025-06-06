@@ -1,4 +1,5 @@
 version: 2
+authtoken: 2xMx723B0wHsp4lnDpZAXKGXHpO_7bqK7wwz9UuVqWDCqK6eB
 tunnels:
   frontend:
     proto: http
