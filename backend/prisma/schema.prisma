@@ -50,6 +50,10 @@ model Project {
   multiCloud          Boolean   @default(false)
   status              String    @default("active") // 'active', 'archived', 'suspended'
   
+  // GitHub integration
+  githubToken         String?   // Encrypted GitHub personal access token for this project
+  githubTokenUpdatedAt DateTime? // When the token was last updated
+  
   // Metadata
   tags                String[]  @default([])
   icon                String?   // Project icon/avatar
