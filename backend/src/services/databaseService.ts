@@ -307,6 +307,97 @@ class DatabaseService {
     }
   }
 
+  async getProjectById(projectId: string, userId: string): Promise<Project | null> {
+    try {
+      return await this.prisma.project.findFirst({
+        where: {
+          id: projectId,
+          userId: userId,
+        },
+        include: {
+          repositories: {
+            include: {
+              analyses: {
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+              },
+            },
+          },
+          cloudConnections: true,
+        },
+      });
+    } catch (error) {
+      logger.error('Error fetching project by ID', error);
+      throw error;
+    }
+  }
+
+  async updateProjectGitHubToken(projectId: string, encryptedToken: string): Promise<Project> {
+    try {
+      const project = await this.prisma.project.update({
+        where: { id: projectId },
+        data: {
+          githubToken: encryptedToken,
+          githubTokenUpdatedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+      logger.info('Project GitHub token updated successfully', { projectId });
+      return project;
+    } catch (error) {
+      logger.error('Error updating project GitHub token', error);
+      throw error;
+    }
+  }
+
+  async removeProjectGitHubToken(projectId: string): Promise<Project> {
+    try {
+      const project = await this.prisma.project.update({
+        where: { id: projectId },
+        data: {
+          githubToken: null,
+          githubTokenUpdatedAt: null,
+          updatedAt: new Date(),
+        },
+      });
+      logger.info('Project GitHub token removed successfully', { projectId });
+      return project;
+    } catch (error) {
+      logger.error('Error removing project GitHub token', error);
+      throw error;
+    }
+  }
+
+  async updateProjectSettings(projectId: string, settings: Partial<Project>): Promise<Project> {
+    try {
+      const project = await this.prisma.project.update({
+        where: { id: projectId },
+        data: {
+          ...settings,
+          updatedAt: new Date(),
+        },
+      });
+      logger.info('Project settings updated successfully', { projectId });
+      return project;
+    } catch (error) {
+      logger.error('Error updating project settings', error);
+      throw error;
+    }
+  }
+
+  async getProjectGitHubToken(projectId: string): Promise<string | null> {
+    try {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { githubToken: true },
+      });
+      return project?.githubToken || null;
+    } catch (error) {
+      logger.error('Error fetching project GitHub token', error);
+      throw error;
+    }
+  }
+
   async getCloudConnections(projectId: string): Promise<CloudConnection[]> {
     try {
       return await this.prisma.cloudConnection.findMany({

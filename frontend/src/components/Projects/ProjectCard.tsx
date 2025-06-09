@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { 
   Box, 
   Card, 
@@ -17,7 +17,8 @@ import {
   CloudQueue as CloudIcon,
   Storage as RepoIcon,
   Rocket as DeployIcon,
-  Circle as StatusIcon
+  Circle as StatusIcon,
+  Settings as SettingsIcon
 } from '@mui/icons-material';
 
 interface CloudConnection {
@@ -56,6 +57,7 @@ interface ProjectCardProps {
 const ProjectCard: React.FC<ProjectCardProps> = ({ project, onEdit, onDelete }) => {
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
+  const navigate = useNavigate();
 
   const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -75,6 +77,11 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onEdit, onDelete }) 
   const handleDelete = () => {
     handleClose();
     onDelete?.(project);
+  };
+
+  const handleSettings = () => {
+    handleClose();
+    navigate(`/projects/${project.id}/settings`);
   };
 
   const getStatusColor = (status: string) => {
@@ -263,6 +270,10 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onEdit, onDelete }) 
           'aria-labelledby': 'basic-button',
         }}
       >
+        <MenuItem onClick={handleSettings}>
+          <SettingsIcon sx={{ mr: 1, fontSize: 20 }} />
+          Project Settings
+        </MenuItem>
         <MenuItem onClick={handleEdit}>Edit Project</MenuItem>
         <MenuItem onClick={handleDelete} sx={{ color: 'error.main' }}>
           Delete Project

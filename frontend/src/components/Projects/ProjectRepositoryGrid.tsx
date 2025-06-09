@@ -7,10 +7,15 @@ import {
   ChartBarIcon,
   EllipsisVerticalIcon,
   LinkIcon,
-  TrashIcon
+  TrashIcon,
+  BeakerIcon,
+  CheckCircleIcon,
+  ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import apiClient from '../../services/api';
+import { repositoryService } from '../../services/repositoryService';
 import AddRepositoryModal from './AddRepositoryModal';
+import AnalysisStatusModal from './AnalysisStatusModal';
 
 interface Repository {
   id: string;
@@ -57,17 +62,50 @@ const ProjectRepositoryGrid: React.FC<ProjectRepositoryGridProps> = ({
   const [showAddModal, setShowAddModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState<string | null>(null);
+  const [analyzingRepos, setAnalyzingRepos] = useState<Set<string>>(new Set());
+  const [analysisModal, setAnalysisModal] = useState<{
+    isOpen: boolean;
+    analysisId: string | null;
+    repositoryName: string;
+  }>({
+    isOpen: false,
+    analysisId: null,
+    repositoryName: ''
+  });
+
+  console.log('🔍 ProjectRepositoryGrid render - dropdownOpen:', dropdownOpen);
+  console.log('🔍 ProjectRepositoryGrid render - repositories count:', repositories.length);
 
   useEffect(() => {
+    console.log('🚀 ProjectRepositoryGrid mounted with projectId:', projectId);
     fetchProjectRepositories();
   }, [projectId]);
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      console.log('🖱️ Click outside detected, dropdownOpen was:', dropdownOpen);
+      if (dropdownOpen) {
+        console.log('🖱️ Closing dropdown for repo:', dropdownOpen);
+        setDropdownOpen(null);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [dropdownOpen]);
+
   const fetchProjectRepositories = async () => {
     try {
+      console.log('📡 Fetching repositories for project:', projectId);
       setLoading(true);
       const response = await apiClient.get(`/projects/${projectId}/repositories`);
+      console.log('📡 Repositories response:', response.data.repositories?.length || 0);
       setRepositories(response.data.repositories || []);
     } catch (err: any) {
+      console.error('❌ Error fetching repositories:', err);
       setError(err.response?.data?.error || 'Failed to fetch repositories');
     } finally {
       setLoading(false);
@@ -91,6 +129,53 @@ const ProjectRepositoryGrid: React.FC<ProjectRepositoryGridProps> = ({
   const handleRepositoryAdded = (newRepository: Repository) => {
     setRepositories(prev => [newRepository, ...prev]);
     onRepositoryUpdate?.();
+  };
+
+  const handleAnalyzeRepository = async (repository: Repository) => {
+    try {
+      console.log('🧪 Starting analysis for repository:', repository.fullName);
+      setAnalyzingRepos(prev => {
+        const newSet = new Set(prev);
+        newSet.add(repository.id);
+        console.log('🧪 Added to analyzing repos:', repository.id);
+        return newSet;
+      });
+      setDropdownOpen(null);
+      
+      // Construct the GitHub URL from the fullName
+      const repoUrl = `https://github.com/${repository.fullName}`;
+      console.log('🧪 Calling repository service with URL:', repoUrl);
+      
+      const response = await repositoryService.startAnalysis(repoUrl);
+      console.log('🧪 Analysis started, response:', response);
+      
+      // Show analysis modal with progress tracking
+      setAnalysisModal({
+        isOpen: true,
+        analysisId: response.analysis.analysisId,
+        repositoryName: repository.fullName
+      });
+      console.log('🧪 Analysis modal opened');
+      
+    } catch (error: any) {
+      console.error('❌ Analysis failed:', error);
+      alert(`❌ Failed to start analysis: ${error.message}`);
+      setAnalyzingRepos(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(repository.id);
+        return newSet;
+      });
+    }
+  };
+
+  const handleCloseAnalysisModal = () => {
+    setAnalysisModal({
+      isOpen: false,
+      analysisId: null,
+      repositoryName: ''
+    });
+    // Refresh repositories to update analysis status
+    fetchProjectRepositories();
   };
 
   const getStatusColor = (status: string) => {
@@ -171,6 +256,8 @@ const ProjectRepositoryGrid: React.FC<ProjectRepositoryGridProps> = ({
             const latestAnalysis = repo.analyses?.[0];
             const techStack = getTechStackIcons(latestAnalysis?.techStack || []);
             const activeDeployments = repo.deployments?.filter(d => d.status === 'deployed') || [];
+            
+            console.log('🏗️ Rendering repo card:', repo.id, 'dropdownOpen check:', dropdownOpen === repo.id);
 
             return (
               <div
@@ -192,11 +279,76 @@ const ProjectRepositoryGrid: React.FC<ProjectRepositoryGridProps> = ({
                       </div>
                     </div>
                     
-                    <div className="relative">
-                      <button className="text-gray-400 hover:text-gray-600">
+                    <div className="relative z-10">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          console.log('🖱️ Dropdown button clicked for repo:', repo.id);
+                          console.log('🖱️ Current dropdownOpen state:', dropdownOpen);
+                          console.log('🖱️ Will set dropdownOpen to:', dropdownOpen === repo.id ? null : repo.id);
+                          setDropdownOpen(dropdownOpen === repo.id ? null : repo.id);
+                        }}
+                        className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100"
+                      >
                         <EllipsisVerticalIcon className="h-5 w-5" />
                       </button>
-                      {/* TODO: Add dropdown menu */}
+                      
+                      {/* Dropdown Menu */}
+                      {dropdownOpen === repo.id && (
+                        <div 
+                          className="absolute right-0 top-8 w-48 bg-white rounded-md shadow-xl border border-gray-200 z-50 ring-1 ring-black ring-opacity-5"
+                          onClick={(e) => {
+                            console.log('🖱️ Dropdown menu clicked');
+                            e.stopPropagation();
+                          }}
+                        >
+                          <div className="py-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                console.log('🧪 Analyze button clicked for repo:', repo.id);
+                                handleAnalyzeRepository(repo);
+                              }}
+                              disabled={analyzingRepos.has(repo.id)}
+                              className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {analyzingRepos.has(repo.id) ? (
+                                <>
+                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-3"></div>
+                                  Analyzing...
+                                </>
+                              ) : (
+                                <>
+                                  <BeakerIcon className="h-4 w-4 mr-3" />
+                                  Analyze Repo
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDropdownOpen(null);
+                                window.open(`https://github.com/${repo.fullName}`, '_blank');
+                              }}
+                              className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                            >
+                              <LinkIcon className="h-4 w-4 mr-3" />
+                              View on GitHub
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDropdownOpen(null);
+                                handleRemoveRepository(repo.id);
+                              }}
+                              className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                            >
+                              <TrashIcon className="h-4 w-4 mr-3" />
+                              Remove from Project
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -206,6 +358,21 @@ const ProjectRepositoryGrid: React.FC<ProjectRepositoryGridProps> = ({
                       {repo.description}
                     </p>
                   )}
+
+                  {/* Analysis Status */}
+                  <div className="mb-4">
+                    {repo.lastAnalyzed ? (
+                      <div className="flex items-center text-sm text-green-600">
+                        <CheckCircleIcon className="h-4 w-4 mr-1" />
+                        Analyzed {new Date(repo.lastAnalyzed).toLocaleDateString()}
+                      </div>
+                    ) : (
+                      <div className="flex items-center text-sm text-gray-500">
+                        <ExclamationTriangleIcon className="h-4 w-4 mr-1" />
+                        Not analyzed yet
+                      </div>
+                    )}
+                  </div>
 
                   {/* Tech Stack */}
                   {techStack.length > 0 && (
@@ -286,6 +453,13 @@ const ProjectRepositoryGrid: React.FC<ProjectRepositoryGridProps> = ({
         projectId={projectId}
         onClose={() => setShowAddModal(false)}
         onRepositoryAdded={handleRepositoryAdded}
+      />
+
+      <AnalysisStatusModal
+        isOpen={analysisModal.isOpen}
+        onClose={handleCloseAnalysisModal}
+        analysisId={analysisModal.analysisId}
+        repositoryName={analysisModal.repositoryName}
       />
     </div>
   );
