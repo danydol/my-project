@@ -1,23 +1,25 @@
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from './contexts/AuthContext';
-import ProtectedRoute from './components/ProtectedRoute';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
+import AuthCallbackPage from './pages/AuthCallbackPage';
 import DashboardPage from './pages/DashboardPage';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectSettingsPage from './pages/ProjectSettingsPage';
 import RepositoryAnalysisPage from './pages/RepositoryAnalysisPage';
-import AuthCallbackPage from './pages/AuthCallbackPage';
+import SettingsPage from './pages/SettingsPage';
 
-// Wrapper component to avoid repetition
-const ProtectedLayoutRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <ProtectedRoute>
-    <Layout>
-      {children}
-    </Layout>
-  </ProtectedRoute>
-);
+// Protected route wrapper
+const ProtectedLayoutRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated } = useAuth();
+  
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+  
+  return <Layout>{children}</Layout>;
+};
 
 function App() {
   const { isAuthenticated, loading } = useAuth();
@@ -48,7 +50,7 @@ function App() {
         <Route path="/repositories" element={<ProtectedLayoutRoute><RepositoryAnalysisPage /></ProtectedLayoutRoute>} />
         <Route path="/deployments" element={<ProtectedLayoutRoute><div className="p-6"><h1 className="text-2xl font-bold">Deployments</h1><p>Coming soon...</p></div></ProtectedLayoutRoute>} />
         <Route path="/analytics" element={<ProtectedLayoutRoute><div className="p-6"><h1 className="text-2xl font-bold">Analytics</h1><p>Coming soon...</p></div></ProtectedLayoutRoute>} />
-        <Route path="/settings" element={<ProtectedLayoutRoute><div className="p-6"><h1 className="text-2xl font-bold">Settings</h1><p>Coming soon...</p></div></ProtectedLayoutRoute>} />
+        <Route path="/settings" element={<ProtectedLayoutRoute><SettingsPage /></ProtectedLayoutRoute>} />
       </Routes>
     </div>
   );

@@ -262,13 +262,19 @@ const ProjectsPage: React.FC = () => {
               }}
             />
           ) : (
-            <CloudConnectionGrid
-              connections={cloudConnections}
-              onConnect={handleConnect}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              onTest={handleTest}
-            />
+            <div className="space-y-6">
+              {/* Existing Cloud Connections */}
+              <div className="border-t pt-6">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Existing Connections</h3>
+                <CloudConnectionGrid
+                  connections={cloudConnections}
+                  onConnect={handleConnect}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onTest={handleTest}
+                />
+              </div>
+            </div>
           )}
         </div>
 

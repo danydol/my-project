@@ -16,7 +16,14 @@ import {
   ListItemIcon,
   Accordion,
   AccordionSummary,
-  AccordionDetails
+  AccordionDetails,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  IconButton,
+  Divider,
+  Grid
 } from '@mui/material';
 import { 
   GitHub as GitHubIcon,
@@ -29,15 +36,88 @@ import {
   Cloud as CloudIcon,
   Monitor as MonitoringIcon,
   Build as BuildIcon,
-  AttachMoney as CostIcon
+  AttachMoney as CostIcon,
+  Key as KeyIcon,
+  ContentCopy as CopyIcon,
+  Settings as SettingsIcon,
+  Link as LinkIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material';
 import { repositoryService, AnalysisStatus, DevOpsAnalysis, DevOpsChecklistItem } from '../services/repositoryService';
+import apiClient from '../services/api';
+
+// Add CSS for spinning animation
+const spinAnimation = `
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .animate-spin {
+    animation: spin 1s linear infinite;
+  }
+`;
 
 const RepositoryAnalysisPage: React.FC = () => {
   const [repoUrl, setRepoUrl] = useState('');
   const [analysis, setAnalysis] = useState<AnalysisStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // GitHub token and SSH key states
+  const [sshKey, setSshKey] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [showSshDialog, setShowSshDialog] = useState(false);
+  const [generatingKey, setGeneratingKey] = useState(false);
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [checkingConnection, setCheckingConnection] = useState(false);
+
+  useEffect(() => {
+    checkGitHubConnection();
+  }, []);
+
+  const checkGitHubConnection = async () => {
+    try {
+      setCheckingConnection(true);
+      const response = await apiClient.get('/auth/me');
+      setGithubConnected(!!response.data.user.githubAccessToken);
+    } catch (error) {
+      setGithubConnected(false);
+    } finally {
+      setCheckingConnection(false);
+    }
+  };
+
+  const generateSSHKey = async () => {
+    try {
+      setGeneratingKey(true);
+      const response = await apiClient.get('/auth/ssh-key');
+      setSshKey(response.data.sshKey);
+      setShowSshDialog(true);
+    } catch (error) {
+      console.error('Failed to generate SSH key:', error);
+      setError('Failed to generate SSH key. Please try again.');
+    } finally {
+      setGeneratingKey(false);
+    }
+  };
+
+  const copySSHKey = async () => {
+    try {
+      await navigator.clipboard.writeText(sshKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy SSH key:', error);
+    }
+  };
+
+  const openGitHubSettings = () => {
+    window.open('https://github.com/settings/keys', '_blank');
+  };
+
+  const handleGitHubReconnect = () => {
+    window.location.href = '/api/auth/github/reauth';
+  };
 
   const handleAnalyze = async () => {
     if (!repoUrl.trim()) {
@@ -118,6 +198,8 @@ const RepositoryAnalysisPage: React.FC = () => {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      <style>{spinAnimation}</style>
+      
       <Typography variant="h4" component="h1" gutterBottom>
         Repository Analysis
       </Typography>
@@ -125,6 +207,108 @@ const RepositoryAnalysisPage: React.FC = () => {
       <Typography variant="body1" color="text.secondary" paragraph>
         Analyze your GitHub repository for DevOps deployment readiness and get personalized recommendations.
       </Typography>
+
+      {/* GitHub Integration Section */}
+      <Card sx={{ mb: 4 }}>
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+            <GitHubIcon sx={{ mr: 2, color: 'primary.main' }} />
+            <Typography variant="h6">
+              GitHub Integration
+            </Typography>
+            {githubConnected && (
+              <Chip 
+                label="Connected" 
+                color="success" 
+                size="small" 
+                sx={{ ml: 2 }}
+              />
+            )}
+          </Box>
+
+          <Grid container spacing={3}>
+            <Grid xs={12} md={6}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <KeyIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                    SSH Key Setup
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    Generate an SSH key to securely connect to your GitHub repositories.
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                    <Button
+                      variant="outlined"
+                      onClick={generateSSHKey}
+                      disabled={generatingKey}
+                      startIcon={generatingKey ? <RefreshIcon className="animate-spin" /> : <KeyIcon />}
+                    >
+                      {generatingKey ? 'Generating...' : 'Generate SSH Key'}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={openGitHubSettings}
+                      startIcon={<SettingsIcon />}
+                    >
+                      GitHub Settings
+                    </Button>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+
+            <Grid xs={12} md={6}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <LinkIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                    GitHub Connection
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    Connect your GitHub account to access private repositories and enable advanced analysis.
+                  </Typography>
+                  {githubConnected ? (
+                    <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                      <Button
+                        variant="outlined"
+                        onClick={handleGitHubReconnect}
+                        startIcon={<RefreshIcon />}
+                      >
+                        Reconnect GitHub
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        onClick={() => window.open('/settings', '_blank')}
+                        startIcon={<SettingsIcon />}
+                      >
+                        Manage Settings
+                      </Button>
+                    </Box>
+                  ) : (
+                    <Button
+                      variant="contained"
+                      onClick={handleGitHubReconnect}
+                      startIcon={<LinkIcon />}
+                    >
+                      Connect GitHub
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+
+          {!githubConnected && (
+            <Alert severity="info" sx={{ mt: 3 }}>
+              <Typography variant="body2">
+                <strong>Tip:</strong> Connecting your GitHub account will allow you to analyze private repositories 
+                and get more detailed insights. You can also generate SSH keys for secure repository access.
+              </Typography>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Input Form */}
       <Card sx={{ mb: 4 }}>
@@ -347,6 +531,93 @@ const RepositoryAnalysisPage: React.FC = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* SSH Key Dialog */}
+      <Dialog 
+        open={showSshDialog} 
+        onClose={() => setShowSshDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <KeyIcon sx={{ mr: 2 }} />
+            SSH Key Generated
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 3 }}>
+            <Typography variant="body2">
+              Your SSH key has been generated successfully. Copy the public key below and add it to your GitHub account.
+            </Typography>
+          </Alert>
+          
+          <Typography variant="subtitle2" gutterBottom>
+            Public SSH Key:
+          </Typography>
+          
+          <Box sx={{ 
+            position: 'relative',
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 1,
+            p: 2,
+            backgroundColor: 'grey.50',
+            fontFamily: 'monospace',
+            fontSize: '0.875rem',
+            wordBreak: 'break-all',
+            maxHeight: 200,
+            overflow: 'auto'
+          }}>
+            {sshKey}
+            <IconButton
+              onClick={copySSHKey}
+              sx={{ 
+                position: 'absolute', 
+                top: 8, 
+                right: 8,
+                backgroundColor: 'background.paper',
+                '&:hover': {
+                  backgroundColor: 'action.hover'
+                }
+              }}
+              size="small"
+            >
+              {copied ? <CheckCircleIcon color="success" /> : <CopyIcon />}
+            </IconButton>
+          </Box>
+          
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            <strong>Next steps:</strong>
+          </Typography>
+          <List dense>
+            <ListItem sx={{ pl: 0 }}>
+              <ListItemText primary="1. Copy the SSH key above" />
+            </ListItem>
+            <ListItem sx={{ pl: 0 }}>
+              <ListItemText primary="2. Go to GitHub Settings → SSH and GPG keys" />
+            </ListItem>
+            <ListItem sx={{ pl: 0 }}>
+              <ListItemText primary="3. Click 'New SSH key' and paste the key" />
+            </ListItem>
+            <ListItem sx={{ pl: 0 }}>
+              <ListItemText primary="4. Give it a descriptive title (e.g., 'DeployAI')" />
+            </ListItem>
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowSshDialog(false)}>
+            Close
+          </Button>
+          <Button 
+            onClick={openGitHubSettings}
+            variant="contained"
+            startIcon={<SettingsIcon />}
+          >
+            Open GitHub Settings
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };

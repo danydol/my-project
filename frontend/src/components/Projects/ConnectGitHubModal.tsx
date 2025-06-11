@@ -76,6 +76,12 @@ const ConnectGitHubModal: React.FC<ConnectGitHubModalProps> = ({
       // Use the fresh endpoint that bypasses all caching
       const response = await apiClient.get('/github/repositories/unconnected-fresh');
       setRepositories(response.data.repositories || []);
+      
+      // Check if we have any private repositories
+      const hasPrivateRepos = response.data.repositories.some((repo: any) => repo.private);
+      if (!hasPrivateRepos && response.data.repositories.length > 0) {
+        setError('No private repositories found. You may need to reconnect your GitHub account to grant access to private repositories. Go to Settings > GitHub Integration to reconnect.');
+      }
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to fetch GitHub repositories');
     } finally {

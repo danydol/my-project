@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import passport from 'passport';
 import { logger } from '../utils/logger';
+import crypto from 'crypto';
 
 const jwt = require('jsonwebtoken');
 
@@ -164,6 +165,47 @@ router.post('/github/disconnect', passport.authenticate('jwt', { session: false 
     res.status(500).json({
       success: false,
       error: 'Failed to clear GitHub tokens'
+    });
+  }
+});
+
+// Generate SSH key for user
+router.get('/ssh-key', passport.authenticate('jwt', { session: false }), (req: any, res) => {
+  try {
+    const user = req.user;
+    
+    // Generate SSH key pair
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+      modulusLength: 4096,
+      publicKeyEncoding: {
+        type: 'spki',
+        format: 'pem'
+      },
+      privateKeyEncoding: {
+        type: 'pkcs8',
+        format: 'pem'
+      }
+    });
+
+    // Create SSH public key in the format GitHub expects
+    const sshPublicKey = `ssh-rsa ${Buffer.from(publicKey).toString('base64')} deployai-${user.username}@${new Date().toISOString().split('T')[0]}`;
+    
+    // Store the private key securely (encrypted) for future use
+    // For now, we'll just return the public key
+    // In production, you'd want to encrypt and store the private key
+    
+    logger.info('SSH key generated for user', { userId: user.id, username: user.username });
+    
+    res.json({
+      success: true,
+      sshKey: sshPublicKey,
+      message: 'SSH key generated successfully. Copy this key and add it to your GitHub account.'
+    });
+  } catch (error) {
+    logger.error('Error generating SSH key', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate SSH key'
     });
   }
 });

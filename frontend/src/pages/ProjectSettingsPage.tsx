@@ -253,7 +253,7 @@ const ProjectSettingsPage: React.FC = () => {
 
       <Grid container spacing={3}>
         {/* Basic Settings */}
-        <Grid size={{ xs: 12, md: 8 }}>
+        <Grid xs={12} md={8}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -354,7 +354,7 @@ const ProjectSettingsPage: React.FC = () => {
         </Grid>
 
         {/* GitHub Integration */}
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid xs={12} md={4}>
           <Card>
             <CardContent>
               <Box display="flex" alignItems="center" mb={2}>

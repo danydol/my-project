@@ -4,7 +4,10 @@ import {
   MagnifyingGlassIcon,
   FolderIcon,
   LinkIcon,
-  CheckIcon
+  CheckIcon,
+  KeyIcon,
+  ClipboardDocumentIcon,
+  Cog6ToothIcon
 } from '@heroicons/react/24/outline';
 import apiClient from '../../services/api';
 import ConnectGitHubModal from './ConnectGitHubModal';
@@ -47,10 +50,13 @@ const AddRepositoryModal: React.FC<AddRepositoryModalProps> = ({
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showConnectModal, setShowConnectModal] = useState(false);
+  const [sshKey, setSshKey] = useState<string>('');
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       fetchUnassignedRepositories();
+      generateSSHKey();
     }
   }, [isOpen]);
 
@@ -124,6 +130,29 @@ const AddRepositoryModal: React.FC<AddRepositoryModalProps> = ({
     return techStack.slice(0, 3).map(tech => tech.name || tech).filter(Boolean);
   };
 
+  const generateSSHKey = async () => {
+    try {
+      const response = await apiClient.get('/auth/ssh-key');
+      setSshKey(response.data.sshKey);
+    } catch (error) {
+      console.error('Failed to generate SSH key:', error);
+    }
+  };
+
+  const copySSHKey = async () => {
+    try {
+      await navigator.clipboard.writeText(sshKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy SSH key:', error);
+    }
+  };
+
+  const openGitHubSettings = () => {
+    window.open('https://github.com/settings/keys', '_blank');
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -186,7 +215,7 @@ const AddRepositoryModal: React.FC<AddRepositoryModalProps> = ({
                   }
                 </p>
                 {!searchTerm && (
-                  <div className="mt-4">
+                  <div className="mt-6 space-y-4">
                     <button
                       onClick={() => setShowConnectModal(true)}
                       className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
@@ -194,6 +223,62 @@ const AddRepositoryModal: React.FC<AddRepositoryModalProps> = ({
                       <LinkIcon className="-ml-1 mr-2 h-4 w-4" />
                       Connect from GitHub
                     </button>
+                    
+                    {/* SSH Key Section */}
+                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-medium text-gray-900 flex items-center">
+                          <KeyIcon className="h-4 w-4 mr-2 text-gray-600" />
+                          SSH Key Setup
+                        </h4>
+                        <button
+                          onClick={openGitHubSettings}
+                          className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800"
+                        >
+                          <Cog6ToothIcon className="h-3 w-3 mr-1" />
+                          GitHub Settings
+                        </button>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <p className="text-xs text-gray-600">
+                          Copy this SSH key and add it to your GitHub account:
+                        </p>
+                        
+                        {sshKey ? (
+                          <div className="relative">
+                            <textarea
+                              readOnly
+                              value={sshKey}
+                              className="w-full h-20 p-2 text-xs font-mono bg-white border border-gray-300 rounded resize-none"
+                              placeholder="Generating SSH key..."
+                            />
+                            <button
+                              onClick={copySSHKey}
+                              className="absolute top-1 right-1 p-1 text-gray-500 hover:text-gray-700 bg-white rounded border"
+                              title="Copy SSH key"
+                            >
+                              {copied ? (
+                                <CheckIcon className="h-3 w-3 text-green-600" />
+                              ) : (
+                                <ClipboardDocumentIcon className="h-3 w-3" />
+                              )}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="h-20 p-2 text-xs text-gray-500 bg-white border border-gray-300 rounded flex items-center justify-center">
+                            Generating SSH key...
+                          </div>
+                        )}
+                        
+                        <div className="text-xs text-gray-500">
+                          <p>1. Copy the SSH key above</p>
+                          <p>2. Go to <button onClick={openGitHubSettings} className="text-blue-600 hover:underline">GitHub Settings → SSH Keys</button></p>
+                          <p>3. Click "New SSH key" and paste the key</p>
+                          <p>4. Return here and connect your repositories</p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
