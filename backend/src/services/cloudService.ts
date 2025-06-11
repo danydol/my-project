@@ -14,7 +14,7 @@ interface ValidationResult {
 // AWS Credentials Validation
 export async function validateAWSCredentials(config: any): Promise<ValidationResult> {
   try {
-    const { accessKeyId, secretAccessKey, region = 'us-east-1' } = config;
+    const { accessKeyId, secretAccessKey, sessionToken, region = 'us-east-1' } = config;
 
     if (!accessKeyId || !secretAccessKey) {
       return {
@@ -23,13 +23,21 @@ export async function validateAWSCredentials(config: any): Promise<ValidationRes
       };
     }
 
+    // Build credentials object - include sessionToken if provided
+    const credentials: any = {
+      accessKeyId,
+      secretAccessKey
+    };
+
+    // Add session token if provided (for temporary credentials)
+    if (sessionToken && sessionToken.trim()) {
+      credentials.sessionToken = sessionToken;
+    }
+
     // Test AWS credentials by describing regions
     const ec2Client = new EC2Client({
       region,
-      credentials: {
-        accessKeyId,
-        secretAccessKey
-      }
+      credentials
     });
 
     const command = new DescribeRegionsCommand({});
@@ -39,7 +47,8 @@ export async function validateAWSCredentials(config: any): Promise<ValidationRes
       valid: true,
       details: {
         regionsFound: response.Regions?.length || 0,
-        testedRegion: region
+        testedRegion: region,
+        credentialType: sessionToken ? 'temporary' : 'permanent'
       }
     };
   } catch (error: any) {

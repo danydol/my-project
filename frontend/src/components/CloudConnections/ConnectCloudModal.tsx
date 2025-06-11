@@ -38,7 +38,8 @@ const ConnectCloudModal: React.FC<ConnectCloudModalProps> = ({
       color: '#FF9900',
       fields: [
         { key: 'accessKeyId', label: 'Access Key ID', type: 'text', required: true },
-        { key: 'secretAccessKey', label: 'Secret Access Key', type: 'password', required: true }
+        { key: 'secretAccessKey', label: 'Secret Access Key', type: 'password', required: true },
+        { key: 'sessionToken', label: 'Session Token (Optional)', type: 'textarea', required: false }
       ]
     },
     gcp: {
