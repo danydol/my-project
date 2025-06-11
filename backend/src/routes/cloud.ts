@@ -342,6 +342,7 @@ router.get('/providers/:provider/regions', async (req: any, res) => {
         { id: 'eu-west-1', name: 'Europe (Ireland)' },
         { id: 'eu-west-2', name: 'Europe (London)' },
         { id: 'eu-central-1', name: 'Europe (Frankfurt)' },
+        { id: 'il-central-1', name: 'Israel (Tel Aviv)' },
         { id: 'ap-southeast-1', name: 'Asia Pacific (Singapore)' },
         { id: 'ap-southeast-2', name: 'Asia Pacific (Sydney)' },
         { id: 'ap-northeast-1', name: 'Asia Pacific (Tokyo)' }
