@@ -8,6 +8,7 @@ import DashboardPage from './pages/DashboardPage';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectSettingsPage from './pages/ProjectSettingsPage';
 import RepositoryAnalysisPage from './pages/RepositoryAnalysisPage';
+import DeploymentsPage from './pages/DeploymentsPage';
 import SettingsPage from './pages/SettingsPage';
 
 // Protected route wrapper
@@ -48,7 +49,7 @@ function App() {
         <Route path="/projects" element={<ProtectedLayoutRoute><ProjectsPage /></ProtectedLayoutRoute>} />
         <Route path="/projects/:projectId/settings" element={<ProtectedLayoutRoute><ProjectSettingsPage /></ProtectedLayoutRoute>} />
         <Route path="/repositories" element={<ProtectedLayoutRoute><RepositoryAnalysisPage /></ProtectedLayoutRoute>} />
-        <Route path="/deployments" element={<ProtectedLayoutRoute><div className="p-6"><h1 className="text-2xl font-bold">Deployments</h1><p>Coming soon...</p></div></ProtectedLayoutRoute>} />
+        <Route path="/deployments" element={<ProtectedLayoutRoute><DeploymentsPage /></ProtectedLayoutRoute>} />
         <Route path="/analytics" element={<ProtectedLayoutRoute><div className="p-6"><h1 className="text-2xl font-bold">Analytics</h1><p>Coming soon...</p></div></ProtectedLayoutRoute>} />
         <Route path="/settings" element={<ProtectedLayoutRoute><SettingsPage /></ProtectedLayoutRoute>} />
       </Routes>

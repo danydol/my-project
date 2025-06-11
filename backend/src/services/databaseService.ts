@@ -746,14 +746,20 @@ class DatabaseService {
   async createDeployment(deploymentData: {
     userId: string;
     repositoryId: string;
+    cloudConnectionId?: string;
     infrastructureId?: string;
     name: string;
     environment: string;
+    provider?: string;
     gitCommitSha?: string;
   }): Promise<Deployment> {
     try {
       const deployment = await this.prisma.deployment.create({
         data: deploymentData,
+        include: {
+          repository: true,
+          cloudConnection: true,
+        },
       });
 
       // Track analytics event
@@ -773,11 +779,42 @@ class DatabaseService {
     }
   }
 
+  async getDeploymentById(deploymentId: string): Promise<Deployment | null> {
+    try {
+      return await this.prisma.deployment.findUnique({
+        where: { id: deploymentId },
+        include: {
+          repository: true,
+          cloudConnection: true,
+        },
+      });
+    } catch (error) {
+      logger.error('Error getting deployment by ID', error);
+      throw error;
+    }
+  }
+
+  async getUserDeployments(userId: string): Promise<Deployment[]> {
+    try {
+      return await this.prisma.deployment.findMany({
+        where: { userId },
+        include: {
+          repository: true,
+          cloudConnection: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    } catch (error) {
+      logger.error('Error getting user deployments', error);
+      throw error;
+    }
+  }
+
   async updateDeploymentStatus(
     deploymentId: string, 
     status: string, 
     additionalData?: {
-      deploymentUrl?: string;
+      deploymentUrl?: string | null;
       errorMessage?: string;
       logs?: string;
     }
@@ -795,22 +832,79 @@ class DatabaseService {
       }
 
       if (additionalData) {
-        Object.assign(updateData, additionalData);
+        if (typeof additionalData.deploymentUrl === 'string' && additionalData.deploymentUrl) {
+          updateData.deploymentUrl = additionalData.deploymentUrl;
+        } else if (additionalData.deploymentUrl === null) {
+          updateData.deploymentUrl = null;
+        }
+        if (typeof additionalData.errorMessage === 'string') {
+          updateData.errorMessage = additionalData.errorMessage;
+        }
+        if (typeof additionalData.logs === 'string') {
+          updateData.logs = additionalData.logs;
+        }
       }
 
       const deployment = await this.prisma.deployment.update({
         where: { id: deploymentId },
         data: updateData,
+        include: {
+          repository: true,
+          cloudConnection: true,
+        },
       });
 
       logger.info('Deployment status updated', { 
         deploymentId, 
         status,
-        deploymentUrl: additionalData?.deploymentUrl 
+        deploymentUrl: updateData.deploymentUrl 
       });
       return deployment;
     } catch (error) {
       logger.error('Error updating deployment status', error);
+      throw error;
+    }
+  }
+
+  // Cloud connection operations
+  async getCloudConnectionById(connectionId: string): Promise<CloudConnection | null> {
+    try {
+      return await this.prisma.cloudConnection.findUnique({
+        where: { id: connectionId },
+      });
+    } catch (error) {
+      logger.error('Error getting cloud connection by ID', error);
+      throw error;
+    }
+  }
+
+  async getUserCloudConnections(userId: string): Promise<CloudConnection[]> {
+    try {
+      return await this.prisma.cloudConnection.findMany({
+        where: {
+          project: {
+            userId: userId,
+          },
+        },
+        include: {
+          project: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    } catch (error) {
+      logger.error('Error getting user cloud connections', error);
+      throw error;
+    }
+  }
+
+  // Repository operations
+  async getRepositoryById(repositoryId: string): Promise<Repository | null> {
+    try {
+      return await this.prisma.repository.findUnique({
+        where: { id: repositoryId },
+      });
+    } catch (error) {
+      logger.error('Error getting repository by ID', error);
       throw error;
     }
   }
