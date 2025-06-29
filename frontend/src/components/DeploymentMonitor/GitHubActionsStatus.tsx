@@ -10,8 +10,12 @@ import {
   Play,
   SkipForward,
   GitBranch,
-  GitCommit
+  GitCommit,
+  Zap,
+  Settings,
+  Eye
 } from 'lucide-react';
+import DeploymentTriggerModal from './DeploymentTriggerModal';
 
 interface GitHubWorkflow {
   id: string;
@@ -62,6 +66,8 @@ const GitHubActionsStatus: React.FC<GitHubActionsStatusProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedWorkflow, setSelectedWorkflow] = useState<GitHubWorkflow | null>(null);
+  const [showTriggerModal, setShowTriggerModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (!repository) return;
@@ -147,36 +153,33 @@ const GitHubActionsStatus: React.FC<GitHubActionsStatusProps> = ({
     return `${minutes}m ${seconds}s`;
   };
 
-  const triggerWorkflow = async (workflowName: string) => {
+  const refreshWorkflows = async () => {
+    setRefreshing(true);
     try {
-      const response = await fetch('/api/github/workflows/trigger', {
-        method: 'POST',
+      const response = await fetch(`/api/github/workflows?repo=${repository}&branch=${branch}`, {
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          repository,
-          workflow: workflowName,
-          branch,
-          inputs: {
-            environment: 'staging',
-            cloud_connection_id: 'your-connection-id' // This should come from props or context
-          }
-        })
+        }
       });
 
       if (!response.ok) {
-        throw new Error('Failed to trigger workflow');
+        throw new Error('Failed to fetch GitHub workflows');
       }
 
-      // Refresh workflows after triggering
-      setTimeout(() => {
-        window.location.reload();
-      }, 2000);
+      const data = await response.json();
+      setWorkflows(data.workflows);
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setRefreshing(false);
     }
+  };
+
+  const handleWorkflowTriggered = (workflowRunId: string) => {
+    // Refresh workflows after triggering
+    setTimeout(() => {
+      refreshWorkflows();
+    }, 2000);
   };
 
   if (loading) {
@@ -223,17 +226,26 @@ const GitHubActionsStatus: React.FC<GitHubActionsStatusProps> = ({
           </div>
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => triggerWorkflow('deploy.yml')}
-              className="inline-flex items-center px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+              onClick={refreshWorkflows}
+              disabled={refreshing}
+              className="p-2 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
+              title="Refresh workflows"
             >
-              <Play className="w-4 h-4 mr-1" />
-              Trigger Deploy
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={() => setShowTriggerModal(true)}
+              className="inline-flex items-center px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors"
+            >
+              <Zap className="w-4 h-4 mr-1" />
+              Trigger Workflow
             </button>
             <a
               href={`https://github.com/${repository}/actions`}
               target="_blank"
               rel="noopener noreferrer"
               className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+              title="View in GitHub Actions"
             >
               <ExternalLink className="w-4 h-4" />
             </a>
@@ -250,123 +262,234 @@ const GitHubActionsStatus: React.FC<GitHubActionsStatusProps> = ({
             <p className="text-gray-600 mb-4">
               No GitHub Actions workflows have been run for this repository yet.
             </p>
-            <button
-              onClick={() => triggerWorkflow('deploy.yml')}
-              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Play className="w-4 h-4 mr-2" />
-              Run First Deployment
-            </button>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                onClick={() => setShowTriggerModal(true)}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Play className="w-4 h-4 mr-2" />
+                Run First Deployment
+              </button>
+              <button
+                onClick={() => setShowTriggerModal(true)}
+                className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                <Zap className="w-4 h-4 mr-2" />
+                Trigger Workflow
+              </button>
+            </div>
           </div>
         ) : (
           workflows.map((workflow) => (
-            <div
-              key={workflow.id}
-              className={`px-6 py-4 cursor-pointer hover:bg-gray-50 transition-colors ${
-                selectedWorkflow?.id === workflow.id ? 'bg-blue-50' : ''
-              }`}
-              onClick={() => setSelectedWorkflow(workflow)}
-            >
-              <div className="flex items-center justify-between">
+            <div key={workflow.id} className="px-6 py-4">
+              <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center space-x-3">
-                  {getStatusIcon(workflow.status, workflow.conclusion)}
+                  <div className="flex items-center space-x-2">
+                    {workflow.status === 'completed' && workflow.conclusion === 'success' && (
+                      <CheckCircle className="w-5 h-5 text-green-500" />
+                    )}
+                    {workflow.status === 'completed' && workflow.conclusion === 'failure' && (
+                      <XCircle className="w-5 h-5 text-red-500" />
+                    )}
+                    {workflow.status === 'in_progress' && (
+                      <Clock className="w-5 h-5 text-blue-500" />
+                    )}
+                    {workflow.status === 'queued' && (
+                      <AlertCircle className="w-5 h-5 text-yellow-500" />
+                    )}
+                  </div>
                   <div>
                     <h4 className="font-medium text-gray-900">{workflow.name}</h4>
-                    <div className="flex items-center space-x-2 mt-1">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(workflow.status, workflow.conclusion)}`}>
-                        {workflow.conclusion || workflow.status}
-                      </span>
-                      <div className="flex items-center text-xs text-gray-500">
-                        <GitBranch className="w-3 h-3 mr-1" />
-                        {workflow.head_branch}
-                      </div>
-                      <div className="flex items-center text-xs text-gray-500">
-                        <GitCommit className="w-3 h-3 mr-1" />
-                        {workflow.head_sha.substring(0, 8)}
-                      </div>
-                    </div>
+                    <p className="text-sm text-gray-600">
+                      Branch: {workflow.head_branch} • 
+                      {workflow.status === 'completed' 
+                        ? ` ${workflow.conclusion} • ${new Date(workflow.completed_at).toLocaleString()}`
+                        : ` ${workflow.status} • ${new Date(workflow.created_at).toLocaleString()}`
+                      }
+                    </p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-sm text-gray-500">
-                    {formatDuration(workflow.created_at, workflow.updated_at)}
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    {new Date(workflow.created_at).toLocaleDateString()}
-                  </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setSelectedWorkflow(workflow)}
+                    className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
+                    title="View details"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setShowTriggerModal(true)}
+                    className="p-2 text-gray-400 hover:text-green-600 transition-colors"
+                    title="Trigger new workflow"
+                  >
+                    <Zap className="w-4 h-4" />
+                  </button>
+                  <a
+                    href={workflow.html_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                    title="View in GitHub"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
                 </div>
               </div>
+
+              {/* Jobs Summary */}
+              {workflow.jobs && workflow.jobs.length > 0 && (
+                <div className="ml-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {workflow.jobs.slice(0, 3).map((job) => (
+                      <div key={job.id} className="flex items-center space-x-2 text-sm">
+                        <div className={`w-2 h-2 rounded-full ${
+                          job.status === 'completed' && job.conclusion === 'success' ? 'bg-green-500' :
+                          job.status === 'completed' && job.conclusion === 'failure' ? 'bg-red-500' :
+                          job.status === 'in_progress' ? 'bg-blue-500' : 'bg-gray-400'
+                        }`} />
+                        <span className="text-gray-700">{job.name}</span>
+                      </div>
+                    ))}
+                    {workflow.jobs.length > 3 && (
+                      <div className="text-sm text-gray-500">
+                        +{workflow.jobs.length - 3} more jobs
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           ))
         )}
       </div>
 
-      {/* Selected Workflow Details */}
+      {/* Workflow Details Modal */}
       {selectedWorkflow && (
-        <div className="border-t bg-gray-50">
-          <div className="px-6 py-4">
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="font-medium text-gray-900">Workflow Details</h4>
-              <a
-                href={selectedWorkflow.html_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center text-sm text-blue-600 hover:text-blue-700"
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b">
+              <h2 className="text-xl font-semibold text-gray-900">Workflow Details</h2>
+              <button
+                onClick={() => setSelectedWorkflow(null)}
+                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
               >
-                <ExternalLink className="w-4 h-4 mr-1" />
-                View on GitHub
-              </a>
+                <X className="w-4 h-4" />
+              </button>
             </div>
-
-            {/* Jobs */}
-            {selectedWorkflow.jobs && selectedWorkflow.jobs.length > 0 && (
-              <div className="space-y-3">
-                {selectedWorkflow.jobs.map((job) => (
-                  <div key={job.id} className="bg-white rounded-lg border p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center space-x-2">
-                        {getStatusIcon(job.status, job.conclusion)}
-                        <h5 className="font-medium text-gray-900">{job.name}</h5>
-                      </div>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(job.status, job.conclusion)}`}>
-                        {job.conclusion || job.status}
+            <div className="p-6 overflow-y-auto max-h-[70vh]">
+              <div className="space-y-6">
+                {/* Workflow Info */}
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">Workflow Information</h3>
+                  <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Name:</span>
+                      <span className="font-medium">{selectedWorkflow.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Status:</span>
+                      <span className={`font-medium ${
+                        selectedWorkflow.status === 'completed' && selectedWorkflow.conclusion === 'success' ? 'text-green-600' :
+                        selectedWorkflow.status === 'completed' && selectedWorkflow.conclusion === 'failure' ? 'text-red-600' :
+                        'text-blue-600'
+                      }`}>
+                        {selectedWorkflow.status} {selectedWorkflow.conclusion && `(${selectedWorkflow.conclusion})`}
                       </span>
                     </div>
-
-                    {/* Steps */}
-                    {job.steps && job.steps.length > 0 && (
-                      <div className="space-y-2">
-                        {job.steps.map((step) => (
-                          <div key={step.number} className="flex items-center justify-between text-sm">
-                            <div className="flex items-center space-x-2">
-                              {getStatusIcon(step.status, step.conclusion)}
-                              <span className="text-gray-700">{step.name}</span>
-                            </div>
-                            {step.started_at && (
-                              <span className="text-gray-500">
-                                {step.completed_at 
-                                  ? formatDuration(step.started_at, step.completed_at)
-                                  : formatDuration(step.started_at)
-                                }
-                              </span>
-                            )}
-                          </div>
-                        ))}
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Branch:</span>
+                      <span className="font-medium">{selectedWorkflow.head_branch}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Created:</span>
+                      <span className="font-medium">{new Date(selectedWorkflow.created_at).toLocaleString()}</span>
+                    </div>
+                    {selectedWorkflow.completed_at && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Completed:</span>
+                        <span className="font-medium">{new Date(selectedWorkflow.completed_at).toLocaleString()}</span>
                       </div>
                     )}
                   </div>
-                ))}
-              </div>
-            )}
+                </div>
 
-            {/* No jobs available */}
-            {(!selectedWorkflow.jobs || selectedWorkflow.jobs.length === 0) && (
-              <div className="text-center py-4">
-                <p className="text-gray-600">Job details not available</p>
+                {/* Jobs */}
+                {selectedWorkflow.jobs && selectedWorkflow.jobs.length > 0 && (
+                  <div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">Jobs</h3>
+                    <div className="space-y-3">
+                      {selectedWorkflow.jobs.map((job) => (
+                        <div key={job.id} className="border rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="font-medium text-gray-900">{job.name}</h4>
+                            <div className="flex items-center space-x-2">
+                              <span className={`px-2 py-1 text-xs rounded-full ${
+                                job.status === 'completed' && job.conclusion === 'success' ? 'bg-green-100 text-green-800' :
+                                job.status === 'completed' && job.conclusion === 'failure' ? 'bg-red-100 text-red-800' :
+                                job.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
+                              }`}>
+                                {job.status} {job.conclusion && `(${job.conclusion})`}
+                              </span>
+                            </div>
+                          </div>
+                          
+                          {/* Steps */}
+                          {job.steps && job.steps.length > 0 && (
+                            <div className="ml-4 space-y-2">
+                              {job.steps.map((step, index) => (
+                                <div key={index} className="flex items-center space-x-2 text-sm">
+                                  <div className={`w-2 h-2 rounded-full ${
+                                    step.status === 'completed' && step.conclusion === 'success' ? 'bg-green-500' :
+                                    step.status === 'completed' && step.conclusion === 'failure' ? 'bg-red-500' :
+                                    step.status === 'in_progress' ? 'bg-blue-500' : 'bg-gray-400'
+                                  }`} />
+                                  <span className="text-gray-700">{step.name}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex items-center justify-center space-x-3 pt-4">
+                  <button
+                    onClick={() => {
+                      setSelectedWorkflow(null);
+                      setShowTriggerModal(true);
+                    }}
+                    className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  >
+                    <Zap className="w-4 h-4 mr-2" />
+                    Trigger New Workflow
+                  </button>
+                  <a
+                    href={selectedWorkflow.html_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4 mr-2" />
+                    View in GitHub
+                  </a>
+                </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
+      )}
+
+      {/* Deployment Trigger Modal */}
+      {showTriggerModal && (
+        <DeploymentTriggerModal
+          isOpen={showTriggerModal}
+          onClose={() => setShowTriggerModal(false)}
+          repository={repository}
+          onWorkflowTriggered={handleWorkflowTriggered}
+        />
       )}
     </div>
   );

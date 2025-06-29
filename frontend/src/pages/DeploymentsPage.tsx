@@ -12,11 +12,13 @@ import {
   Cloud,
   Settings,
   RefreshCw,
-  Eye
+  Eye,
+  Zap
 } from 'lucide-react';
 import apiClient from '../services/api';
 import DeploymentProgressModal from '../components/DeploymentMonitor/DeploymentProgressModal';
 import GitHubActionsStatus from '../components/DeploymentMonitor/GitHubActionsStatus';
+import DeploymentTriggerModal from '../components/DeploymentMonitor/DeploymentTriggerModal';
 
 interface Repository {
   id: string;
@@ -66,6 +68,8 @@ const DeploymentsPage: React.FC = () => {
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [showGitHubStatus, setShowGitHubStatus] = useState(false);
+  const [showTriggerModal, setShowTriggerModal] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadDeployments();
@@ -154,6 +158,16 @@ const DeploymentsPage: React.FC = () => {
     setShowGitHubStatus(true);
   };
 
+  const triggerWorkflow = (deployment: Deployment) => {
+    setSelectedDeployment(deployment);
+    setShowTriggerModal(true);
+  };
+
+  const handleWorkflowTriggered = (workflowRunId: string) => {
+    // Refresh deployments to show updated status
+    fetchDeployments();
+  };
+
   const resetForm = () => {
     setSelectedRepo('');
     setSelectedCloud('');
@@ -224,20 +238,29 @@ const DeploymentsPage: React.FC = () => {
   }
 
   return (
-    <div className="p-6">
+    <div className="container mx-auto px-4 py-8">
       {/* Header */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Deployments</h1>
-          <p className="text-gray-600 mt-1">Manage your application deployments with AWS and Git integration</p>
+          <h1 className="text-3xl font-bold text-gray-900">Deployments</h1>
+          <p className="text-gray-600 mt-2">Manage your application deployments and infrastructure</p>
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          New Deployment
-        </button>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => setShowTriggerModal(true)}
+            className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+          >
+            <Zap className="w-4 h-4 mr-2" />
+            Trigger Workflow
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            New Deployment
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -341,6 +364,15 @@ const DeploymentsPage: React.FC = () => {
                       title="View deployment progress"
                     >
                       <Eye className="w-4 h-4" />
+                    </button>
+                    
+                    {/* Trigger Workflow Button */}
+                    <button
+                      onClick={() => triggerWorkflow(deployment)}
+                      className="p-2 text-gray-400 hover:text-green-600 transition-colors"
+                      title="Trigger GitHub Actions workflow"
+                    >
+                      <Zap className="w-4 h-4" />
                     </button>
                     
                     {/* GitHub Actions Button */}
@@ -541,6 +573,16 @@ const DeploymentsPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Deployment Trigger Modal */}
+      {showTriggerModal && (
+        <DeploymentTriggerModal
+          isOpen={showTriggerModal}
+          onClose={() => setShowTriggerModal(false)}
+          repository={selectedDeployment ? `${selectedDeployment.repository.owner}/${selectedDeployment.repository.name}` : ''}
+          onWorkflowTriggered={handleWorkflowTriggered}
+        />
       )}
     </div>
   );
