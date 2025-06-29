@@ -1,19 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  GitHub, 
+  GitBranch, 
+  Play, 
+  Clock, 
   CheckCircle, 
   XCircle, 
-  Clock, 
-  RefreshCw, 
-  ExternalLink,
   AlertCircle,
-  Play,
-  SkipForward,
-  GitBranch,
-  GitCommit,
+  RefreshCw,
+  ExternalLink,
   Zap,
   Settings,
-  Eye
+  Eye,
+  X
 } from 'lucide-react';
 import DeploymentTriggerModal from './DeploymentTriggerModal';
 
@@ -24,6 +22,7 @@ interface GitHubWorkflow {
   conclusion?: 'success' | 'failure' | 'cancelled' | 'skipped';
   created_at: string;
   updated_at: string;
+  completed_at?: string;
   head_branch: string;
   head_sha: string;
   html_url: string;
@@ -117,7 +116,7 @@ const GitHubActionsStatus: React.FC<GitHubActionsStatusProps> = ({
       } else if (conclusion === 'failure') {
         return <XCircle className="w-4 h-4 text-red-500" />;
       } else if (conclusion === 'cancelled') {
-        return <SkipForward className="w-4 h-4 text-gray-500" />;
+        return <AlertCircle className="w-4 h-4 text-gray-500" />;
       }
     }
     
@@ -186,7 +185,7 @@ const GitHubActionsStatus: React.FC<GitHubActionsStatusProps> = ({
     return (
       <div className="bg-white rounded-lg border p-6">
         <div className="flex items-center space-x-3 mb-4">
-          <GitHub className="w-6 h-6 text-gray-600" />
+          <GitBranch className="w-6 h-6 text-gray-600" />
           <h3 className="text-lg font-medium text-gray-900">GitHub Actions</h3>
         </div>
         <div className="flex items-center justify-center py-8">
@@ -201,7 +200,7 @@ const GitHubActionsStatus: React.FC<GitHubActionsStatusProps> = ({
     return (
       <div className="bg-white rounded-lg border p-6">
         <div className="flex items-center space-x-3 mb-4">
-          <GitHub className="w-6 h-6 text-gray-600" />
+          <GitBranch className="w-6 h-6 text-gray-600" />
           <h3 className="text-lg font-medium text-gray-900">GitHub Actions</h3>
         </div>
         <div className="flex items-center p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -218,7 +217,7 @@ const GitHubActionsStatus: React.FC<GitHubActionsStatusProps> = ({
       <div className="px-6 py-4 border-b">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <GitHub className="w-6 h-6 text-gray-600" />
+            <GitBranch className="w-6 h-6 text-gray-600" />
             <div>
               <h3 className="text-lg font-medium text-gray-900">GitHub Actions</h3>
               <p className="text-sm text-gray-600">{repository} • {branch}</p>
@@ -257,7 +256,7 @@ const GitHubActionsStatus: React.FC<GitHubActionsStatusProps> = ({
       <div className="divide-y divide-gray-200">
         {workflows.length === 0 ? (
           <div className="px-6 py-8 text-center">
-            <GitHub className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <GitBranch className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <h4 className="text-lg font-medium text-gray-900 mb-2">No workflows found</h4>
             <p className="text-gray-600 mb-4">
               No GitHub Actions workflows have been run for this repository yet.
@@ -303,7 +302,7 @@ const GitHubActionsStatus: React.FC<GitHubActionsStatusProps> = ({
                     <p className="text-sm text-gray-600">
                       Branch: {workflow.head_branch} • 
                       {workflow.status === 'completed' 
-                        ? ` ${workflow.conclusion} • ${new Date(workflow.completed_at).toLocaleString()}`
+                        ? ` ${workflow.conclusion} • ${workflow.completed_at ? new Date(workflow.completed_at).toLocaleString() : 'N/A'}`
                         : ` ${workflow.status} • ${new Date(workflow.created_at).toLocaleString()}`
                       }
                     </p>

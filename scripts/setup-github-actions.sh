@@ -75,8 +75,8 @@ get_deploy_ai_config() {
     echo "Please provide your Deploy.AI configuration:"
     
     # Get Deploy.AI API URL
-    read -p "Deploy.AI API URL [https://7e72-77-137-25-91.ngrok-free.app]: " DEPLOY_AI_API_URL
-    DEPLOY_AI_API_URL=${DEPLOY_AI_API_URL:-https://7e72-77-137-25-91.ngrok-free.app}
+    read -p "Deploy.AI API URL [https://bafb-77-137-25-91.ngrok-free.app]: " DEPLOY_AI_API_URL
+    DEPLOY_AI_API_URL=${DEPLOY_AI_API_URL:-https://bafb-77-137-25-91.ngrok-free.app}
     
     # Get Deploy.AI JWT Token
     echo ""

@@ -13,7 +13,8 @@ import {
   Settings,
   RefreshCw,
   Eye,
-  Zap
+  Zap,
+  X
 } from 'lucide-react';
 import apiClient from '../services/api';
 import DeploymentProgressModal from '../components/DeploymentMonitor/DeploymentProgressModal';
@@ -165,7 +166,7 @@ const DeploymentsPage: React.FC = () => {
 
   const handleWorkflowTriggered = (workflowRunId: string) => {
     // Refresh deployments to show updated status
-    fetchDeployments();
+    loadDeployments();
   };
 
   const resetForm = () => {
@@ -335,7 +336,7 @@ const DeploymentsPage: React.FC = () => {
                 Create Deployment
               </button>
             </div>
-          ) :
+          ) : (
             deployments.map((deployment) => (
               <div key={deployment.id} className="px-6 py-4 hover:bg-gray-50">
                 <div className="flex items-center justify-between">
