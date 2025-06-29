@@ -36,6 +36,7 @@ export const setupPassport = (): void => {
   },
   async (accessToken: string, refreshToken: string, profile: GitHubProfile, done: Function) => {
     try {
+      logger.info('GitHub Access Token:', { accessToken });
       logger.info('GitHub OAuth callback received', { username: profile.username, profileId: profile.id });
       
       const githubId = profile.id;

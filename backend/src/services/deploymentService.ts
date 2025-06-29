@@ -98,7 +98,9 @@ class DeploymentService {
 
       if (terraformResult.success) {
         // Update deployment with success
-        const deploymentUrl = this.extractDeploymentUrl(terraformResult.output);
+        const deploymentUrl = terraformResult.output
+          ? this.extractDeploymentUrl(terraformResult.output)
+          : null;
         const updateData: any = { logs: terraformResult.output };
         if (deploymentUrl) {
           updateData.deploymentUrl = deploymentUrl;
@@ -717,6 +719,90 @@ ec2_volume_size = 20
         errorMessage: error.message
       });
       throw error;
+    }
+  }
+
+  /**
+   * Import a resource into Terraform state
+   * @param params { workspaceId, resourceType, resourceName, resourceId, cloudConnection }
+   */
+  async importTerraformResource({
+    workspaceId,
+    resourceType,
+    resourceName,
+    resourceId,
+    cloudConnection
+  }: {
+    workspaceId: string;
+    resourceType: string;
+    resourceName: string;
+    resourceId: string;
+    cloudConnection: any;
+  }): Promise<TerraformExecutionResult & { logs: string[], stateFilePath?: string }> {
+    const logs: string[] = [];
+    try {
+      // Prepare workspace
+      const workspacePath = path.join(this.terraformDir, workspaceId);
+      const terraformDir = path.join(workspacePath, 'terraform');
+      fs.mkdirSync(terraformDir, { recursive: true });
+      logs.push(`Workspace prepared at ${terraformDir}`);
+
+      // Set up credentials (AWS only for now)
+      if (cloudConnection.provider === 'aws') {
+        await this.setupAWSCredentials(cloudConnection, workspacePath);
+        logs.push('AWS credentials configured');
+      }
+      // TODO: Add support for GCP/Azure
+
+      // Generate or update .tf file for the resource
+      const tfFile = path.join(terraformDir, `${resourceType}_${resourceName}.tf`);
+      if (!fs.existsSync(tfFile)) {
+        const tfBlock = `resource \"${resourceType}\" \"${resourceName}\" {\n  # Managed by DeployAI import\n}\n`;
+        fs.writeFileSync(tfFile, tfBlock);
+        logs.push(`Terraform resource block written to ${tfFile}`);
+      } else {
+        logs.push(`Terraform resource block already exists at ${tfFile}`);
+      }
+
+      // Run terraform init
+      logs.push('Running terraform init...');
+      const initResult = await execAsync('terraform init', { cwd: terraformDir });
+      logs.push(initResult.stdout);
+
+      // Run terraform import
+      const importCmd = `terraform import ${resourceType}.${resourceName} ${resourceId}`;
+      logs.push(`Running: ${importCmd}`);
+      const importResult = await execAsync(importCmd, { cwd: terraformDir });
+      logs.push(importResult.stdout);
+
+      // Save the state file path
+      const stateFilePath = path.join(terraformDir, 'terraform.tfstate');
+      let stateContent = null;
+      if (fs.existsSync(stateFilePath)) {
+        stateContent = fs.readFileSync(stateFilePath, 'utf-8');
+        logs.push(`Terraform state saved at ${stateFilePath}`);
+      } else {
+        logs.push('Terraform state file not found after import.');
+      }
+
+      // Optionally, update the repository record with state file path (pseudo-code, implement as needed)
+      // await databaseService.updateRepository(workspaceId, { terraformStatePath: stateFilePath });
+
+      return {
+        success: true,
+        output: importResult.stdout,
+        logs,
+        stateFilePath
+      };
+    } catch (error: any) {
+      logger.error('Error importing Terraform resource', error);
+      logs.push(error.stdout || error.stderr || error.message);
+      return {
+        success: false,
+        error: error.message,
+        output: error.stdout || error.stderr,
+        logs
+      };
     }
   }
 }

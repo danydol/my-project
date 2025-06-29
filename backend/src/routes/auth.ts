@@ -198,8 +198,8 @@ router.get('/ssh-key', passport.authenticate('jwt', { session: false }), (req: a
     
     res.json({
       success: true,
-      sshKey: sshPublicKey,
-      message: 'SSH key generated successfully. Copy this key and add it to your GitHub account.'
+
+      message: 'SSH key generated successfully. Copy this key and a      sshKey: sshPublicKey,dd it to your GitHub account.'
     });
   } catch (error) {
     logger.error('Error generating SSH key', error);

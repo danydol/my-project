@@ -18,7 +18,7 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: process.env.BASE_URL || 'https://5539-2a02-14f-170-8c15-6d50-4a48-2fa7-ea9b.ngrok-free.app',
+    baseURL: 'https://4d49-2a06-c701-91e6-1e00-2c8d-9c40-ad87-3e91.ngrok-free.app',
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',

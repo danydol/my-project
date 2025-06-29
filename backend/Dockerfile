@@ -71,6 +71,9 @@ COPY --chown=deployai:nodejs backend/healthcheck.js ./
 # Create logs directory with proper permissions
 RUN mkdir -p logs && chown deployai:nodejs logs
 
+# Create terraform-workspaces directory with write permissions
+RUN mkdir -p /app/terraform-workspaces && chmod 777 /app/terraform-workspaces
+
 # Switch to non-root user
 USER deployai
 

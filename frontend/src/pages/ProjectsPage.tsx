@@ -6,6 +6,7 @@ import ConnectCloudModal from '../components/CloudConnections/ConnectCloudModal'
 import ProjectRepositoryGrid from '../components/Projects/ProjectRepositoryGrid';
 import CreateProjectModal from '../components/Projects/CreateProjectModal';
 import apiClient from '../services/api';
+import ImportedCloudObjects from '../components/Repositories/ImportedCloudObjects';
 
 interface Project {
   id: string;
@@ -171,6 +172,7 @@ const ProjectsPage: React.FC = () => {
   if (loading) {
     return (
       <div className="p-6">
+        <ImportedCloudObjects />
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-300 rounded w-1/4"></div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -186,6 +188,7 @@ const ProjectsPage: React.FC = () => {
   if (error) {
     return (
       <div className="p-6">
+        <ImportedCloudObjects />
         <div className="bg-red-50 border border-red-200 rounded-md p-4">
           <div className="text-red-800">
             <strong>Error:</strong> {error}
@@ -260,6 +263,7 @@ const ProjectsPage: React.FC = () => {
               onRepositoryUpdate={() => {
                 // Optionally refresh project data or show success message
               }}
+              cloudConnections={cloudConnections}
             />
           ) : (
             <div className="space-y-6">
@@ -292,6 +296,7 @@ const ProjectsPage: React.FC = () => {
 
   return (
     <div className="p-6">
+      <ImportedCloudObjects />
       <div className="mb-8">
         <div className="flex justify-between items-center">
           <div>

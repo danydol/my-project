@@ -16,6 +16,7 @@ import apiClient from '../../services/api';
 import { repositoryService } from '../../services/repositoryService';
 import AddRepositoryModal from './AddRepositoryModal';
 import AnalysisStatusModal from './AnalysisStatusModal';
+import ImportCloudObjectModal from './ImportCloudObjectModal';
 
 interface Repository {
   id: string;
@@ -52,11 +53,13 @@ interface Repository {
 interface ProjectRepositoryGridProps {
   projectId: string;
   onRepositoryUpdate?: () => void;
+  cloudConnections: any[];
 }
 
 const ProjectRepositoryGrid: React.FC<ProjectRepositoryGridProps> = ({
   projectId,
   onRepositoryUpdate,
+  cloudConnections,
 }) => {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -73,6 +76,8 @@ const ProjectRepositoryGrid: React.FC<ProjectRepositoryGridProps> = ({
     analysisId: null,
     repositoryName: ''
   });
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importRepoId, setImportRepoId] = useState<string | null>(null);
 
   console.log('🔍 ProjectRepositoryGrid render - dropdownOpen:', dropdownOpen);
   console.log('🔍 ProjectRepositoryGrid render - repositories count:', repositories.length);
@@ -346,6 +351,18 @@ const ProjectRepositoryGrid: React.FC<ProjectRepositoryGridProps> = ({
                               <TrashIcon className="h-4 w-4 mr-3" />
                               Remove from Project
                             </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDropdownOpen(null);
+                                setImportRepoId(repo.id);
+                                setImportModalOpen(true);
+                              }}
+                              className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                            >
+                              <CloudIcon className="h-4 w-4 mr-3" />
+                              Import Cloud Object
+                            </button>
                           </div>
                         </div>
                       )}
@@ -460,6 +477,14 @@ const ProjectRepositoryGrid: React.FC<ProjectRepositoryGridProps> = ({
         onClose={handleCloseAnalysisModal}
         analysisId={analysisModal.analysisId}
         repositoryName={analysisModal.repositoryName}
+      />
+
+      <ImportCloudObjectModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        repoId={importRepoId || ''}
+        cloudConnections={cloudConnections}
+        onImportSuccess={fetchProjectRepositories}
       />
     </div>
   );

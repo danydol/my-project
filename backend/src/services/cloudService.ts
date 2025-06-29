@@ -170,24 +170,25 @@ export async function encryptCredentials(credentials: any): Promise<string> {
 // Decrypt credentials
 export async function decryptCredentials(encryptedData: string): Promise<any> {
   try {
+    if (!encryptedData || typeof encryptedData !== 'string') {
+      logger.error('decryptCredentials: Encrypted data is missing or not a string', { encryptedData });
+      throw new Error('Encrypted credentials are missing or invalid');
+    }
     const parts = encryptedData.split(':');
     if (parts.length !== 3) {
+      logger.error('decryptCredentials: Invalid encrypted data format', { encryptedData });
       throw new Error('Invalid encrypted data format');
     }
-    
     const iv = Buffer.from(parts[0], 'hex');
     const authTag = Buffer.from(parts[1], 'hex');
     const encrypted = parts[2];
-    
     const decipher = crypto.createDecipher(ALGORITHM, ENCRYPTION_KEY);
     decipher.setAuthTag(authTag);
-    
     let decrypted = decipher.update(encrypted, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
-    
     return JSON.parse(decrypted);
   } catch (error: any) {
-    logger.error('Failed to decrypt credentials', { error: error.message });
+    logger.error('Failed to decrypt credentials', { error: error.message, encryptedData });
     throw new Error('Failed to decrypt credentials');
   }
 } 

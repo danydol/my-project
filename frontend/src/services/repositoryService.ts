@@ -144,6 +144,11 @@ class RepositoryService {
       throw new Error(error.response?.data?.error || 'Failed to delete analysis');
     }
   }
+
+  async getImportedCloudObjects() {
+    const response = await apiClient.get('/repositories/imported-cloud-objects');
+    return response.data.importedObjects;
+  }
 }
 
 export const repositoryService = new RepositoryService(); 

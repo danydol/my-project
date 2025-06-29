@@ -11,9 +11,12 @@ import {
   GitBranch,
   Cloud,
   Settings,
-  RefreshCw
+  RefreshCw,
+  Eye
 } from 'lucide-react';
 import apiClient from '../services/api';
+import DeploymentProgressModal from '../components/DeploymentMonitor/DeploymentProgressModal';
+import GitHubActionsStatus from '../components/DeploymentMonitor/GitHubActionsStatus';
 
 interface Repository {
   id: string;
@@ -44,6 +47,7 @@ interface Deployment {
   createdAt: string;
   repository: Repository;
   cloudConnection: CloudConnection;
+  githubActionsUrl?: string;
 }
 
 const DeploymentsPage: React.FC = () => {
@@ -57,10 +61,19 @@ const DeploymentsPage: React.FC = () => {
   const [selectedCloud, setSelectedCloud] = useState('');
   const [environment, setEnvironment] = useState('dev');
   const [region, setRegion] = useState('');
+  
+  // New state for monitoring
+  const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [showGitHubStatus, setShowGitHubStatus] = useState(false);
 
   useEffect(() => {
     loadDeployments();
     loadAvailableResources();
+    
+    // Auto-refresh deployments every 30 seconds
+    const interval = setInterval(loadDeployments, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadDeployments = async () => {
@@ -99,9 +112,14 @@ const DeploymentsPage: React.FC = () => {
         region
       });
 
-      setDeployments(prev => [response.data.deployment, ...prev]);
+      const newDeployment = response.data.deployment;
+      setDeployments(prev => [newDeployment, ...prev]);
       setShowCreateModal(false);
       resetForm();
+      
+      // Auto-open progress modal for new deployment
+      setSelectedDeployment(newDeployment);
+      setShowProgressModal(true);
     } catch (error) {
       console.error('Error creating deployment:', error);
       alert('Failed to create deployment');
@@ -124,6 +142,16 @@ const DeploymentsPage: React.FC = () => {
       console.error('Error destroying deployment:', error);
       alert('Failed to destroy deployment');
     }
+  };
+
+  const viewDeploymentProgress = (deployment: Deployment) => {
+    setSelectedDeployment(deployment);
+    setShowProgressModal(true);
+  };
+
+  const viewGitHubStatus = (deployment: Deployment) => {
+    setSelectedDeployment(deployment);
+    setShowGitHubStatus(true);
   };
 
   const resetForm = () => {
@@ -284,7 +312,7 @@ const DeploymentsPage: React.FC = () => {
                 Create Deployment
               </button>
             </div>
-          ) : (
+          ) :
             deployments.map((deployment) => (
               <div key={deployment.id} className="px-6 py-4 hover:bg-gray-50">
                 <div className="flex items-center justify-between">
@@ -306,6 +334,27 @@ const DeploymentsPage: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
+                    {/* View Progress Button */}
+                    <button
+                      onClick={() => viewDeploymentProgress(deployment)}
+                      className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
+                      title="View deployment progress"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    
+                    {/* GitHub Actions Button */}
+                    {deployment.githubActionsUrl && (
+                      <button
+                        onClick={() => viewGitHubStatus(deployment)}
+                        className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                        title="View GitHub Actions"
+                      >
+                        <GitBranch className="w-4 h-4" />
+                      </button>
+                    )}
+                    
+                    {/* External Link */}
                     {deployment.deploymentUrl && deployment.status === 'deployed' && (
                       <a
                         href={deployment.deploymentUrl}
@@ -316,6 +365,8 @@ const DeploymentsPage: React.FC = () => {
                         <ExternalLink className="w-4 h-4" />
                       </a>
                     )}
+                    
+                    {/* Destroy Button */}
                     {deployment.status === 'deployed' && (
                       <button
                         onClick={() => destroyDeployment(deployment.id)}
@@ -418,17 +469,11 @@ const DeploymentsPage: React.FC = () => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Select a region</option>
+                  <option value="il-central-1">Israel Central (il-central-1)</option>
                   <option value="us-east-1">US East (N. Virginia)</option>
-                  <option value="us-east-2">US East (Ohio)</option>
-                  <option value="us-west-1">US West (N. California)</option>
                   <option value="us-west-2">US West (Oregon)</option>
                   <option value="eu-west-1">Europe (Ireland)</option>
-                  <option value="eu-west-2">Europe (London)</option>
-                  <option value="eu-central-1">Europe (Frankfurt)</option>
-                  <option value="il-central-1">Israel (Tel Aviv)</option>
                   <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
-                  <option value="ap-southeast-2">Asia Pacific (Sydney)</option>
-                  <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
                 </select>
               </div>
             </div>
@@ -461,6 +506,38 @@ const DeploymentsPage: React.FC = () => {
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deployment Progress Modal */}
+      {showProgressModal && selectedDeployment && (
+        <DeploymentProgressModal
+          isOpen={showProgressModal}
+          onClose={() => setShowProgressModal(false)}
+          deploymentId={selectedDeployment.id}
+        />
+      )}
+
+      {/* GitHub Actions Status Modal */}
+      {showGitHubStatus && selectedDeployment && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b">
+              <h2 className="text-xl font-semibold text-gray-900">GitHub Actions Status</h2>
+              <button
+                onClick={() => setShowGitHubStatus(false)}
+                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[70vh]">
+              <GitHubActionsStatus
+                repository={`${selectedDeployment.repository.owner}/${selectedDeployment.repository.name}`}
+                deploymentId={selectedDeployment.id}
+              />
             </div>
           </div>
         </div>

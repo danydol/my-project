@@ -89,7 +89,7 @@ model CloudConnection {
   errorMessage        String?
   
   // Provider-specific configuration (encrypted)
-  config              Json      // Encrypted credentials and settings
+  config              String    // Encrypted credentials and settings (was Json)
   region              String?   // Default region for this connection
   
   // Metadata
@@ -128,6 +128,8 @@ model Repository {
   isActive        Boolean   @default(true)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+
+  cloudObjects    Json      @default("[]")
 
   // Relations
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)

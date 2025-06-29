@@ -3,6 +3,7 @@ import { Octokit } from '@octokit/rest';
 import passport from 'passport';
 import { logger } from '../utils/logger';
 import databaseService from '../services/databaseService';
+import { Response } from 'express';
 
 const router = Router();
 
@@ -559,6 +560,341 @@ router.get('/repositories/:owner/:repo/branches', async (req: any, res) => {
     return res.status(500).json({
       success: false,
       error: 'Failed to fetch repository branches'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/github/workflows:
+ *   get:
+ *     summary: Get GitHub Actions workflows for a repository
+ *     tags: [GitHub]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: repo
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Repository name (owner/repo)
+ *       - in: query
+ *         name: branch
+ *         schema:
+ *           type: string
+ *         description: Branch name (default: main)
+ *     responses:
+ *       200:
+ *         description: Workflows retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 workflows:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       name:
+ *                         type: string
+ *                       status:
+ *                         type: string
+ *                         enum: [queued, in_progress, completed, failed, cancelled]
+ *                       conclusion:
+ *                         type: string
+ *                         enum: [success, failure, cancelled, skipped]
+ *                       created_at:
+ *                         type: string
+ *                       updated_at:
+ *                         type: string
+ *                       head_branch:
+ *                         type: string
+ *                       head_sha:
+ *                         type: string
+ *                       html_url:
+ *                         type: string
+ *                       jobs:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             id:
+ *                               type: string
+ *                             name:
+ *                               type: string
+ *                             status:
+ *                               type: string
+ *                             conclusion:
+ *                               type: string
+ *                             started_at:
+ *                               type: string
+ *                             completed_at:
+ *                               type: string
+ *                             steps:
+ *                               type: array
+ *                               items:
+ *                                 type: object
+ *                                 properties:
+ *                                   name:
+ *                                     type: string
+ *                                   status:
+ *                                     type: string
+ *                                   conclusion:
+ *                                     type: string
+ *                                   started_at:
+ *                                     type: string
+ *                                   completed_at:
+ *                                     type: string
+ *                                   number:
+ *                                     type: number
+ *       400:
+ *         description: Invalid repository format
+ *       401:
+ *         description: GitHub authentication required
+ *       500:
+ *         description: Server error
+ */
+router.get('/workflows', async (req: any, res: Response) => {
+  try {
+    const { repo, branch = 'main' } = req.query;
+    
+    if (!repo || !repo.includes('/')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid repository format. Use owner/repo'
+      });
+    }
+
+    const [owner, repository] = repo.split('/');
+    
+    // Get GitHub token from user's project settings
+    const project = await databaseService.getProjectByRepository(owner, repository);
+    if (!project || !project.githubToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'GitHub token not configured for this repository'
+      });
+    }
+
+    // Fetch workflows from GitHub API
+    const octokit = new Octokit({
+      auth: project.githubToken
+    });
+
+    // Get workflow runs
+    const { data: workflowRuns } = await octokit.rest.actions.listWorkflowRunsForRepo({
+      owner,
+      repo: repository,
+      branch,
+      per_page: 10
+    });
+
+    // Get detailed job information for each workflow run
+    const workflowsWithJobs = await Promise.all(
+      workflowRuns.workflow_runs.map(async (run) => {
+        try {
+          const { data: jobs } = await octokit.rest.actions.listJobsForWorkflowRun({
+            owner,
+            repo: repository,
+            run_id: run.id
+          });
+
+          const jobsWithSteps = await Promise.all(
+            jobs.jobs.map(async (job) => {
+              try {
+                const { data: steps } = await octokit.rest.actions.listJobSteps({
+                  owner,
+                  repo: repository,
+                  job_id: job.id
+                });
+
+                return {
+                  id: job.id.toString(),
+                  name: job.name,
+                  status: job.status,
+                  conclusion: job.conclusion,
+                  started_at: job.started_at,
+                  completed_at: job.completed_at,
+                  steps: steps.steps.map(step => ({
+                    name: step.name,
+                    status: step.status,
+                    conclusion: step.conclusion,
+                    started_at: step.started_at,
+                    completed_at: step.completed_at,
+                    number: step.number
+                  }))
+                };
+              } catch (error) {
+                logger.error('Error fetching job steps:', error);
+                return {
+                  id: job.id.toString(),
+                  name: job.name,
+                  status: job.status,
+                  conclusion: job.conclusion,
+                  started_at: job.started_at,
+                  completed_at: job.completed_at,
+                  steps: []
+                };
+              }
+            })
+          );
+
+          return {
+            id: run.id.toString(),
+            name: run.name,
+            status: run.status,
+            conclusion: run.conclusion,
+            created_at: run.created_at,
+            updated_at: run.updated_at,
+            head_branch: run.head_branch,
+            head_sha: run.head_sha,
+            html_url: run.html_url,
+            jobs: jobsWithSteps
+          };
+        } catch (error) {
+          logger.error('Error fetching workflow jobs:', error);
+          return {
+            id: run.id.toString(),
+            name: run.name,
+            status: run.status,
+            conclusion: run.conclusion,
+            created_at: run.created_at,
+            updated_at: run.updated_at,
+            head_branch: run.head_branch,
+            head_sha: run.head_sha,
+            html_url: run.html_url,
+            jobs: []
+          };
+        }
+      })
+    );
+
+    return res.json({
+      success: true,
+      workflows: workflowsWithJobs
+    });
+  } catch (error: any) {
+    logger.error('Error fetching GitHub workflows:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch workflows'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/github/workflows/trigger:
+ *   post:
+ *     summary: Trigger a GitHub Actions workflow
+ *     tags: [GitHub]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - repository
+ *               - workflow
+ *               - branch
+ *             properties:
+ *               repository:
+ *                 type: string
+ *                 description: Repository name (owner/repo)
+ *               workflow:
+ *                 type: string
+ *                 description: Workflow file name (e.g., deploy.yml)
+ *               branch:
+ *                 type: string
+ *                 description: Branch to trigger workflow on
+ *               inputs:
+ *                 type: object
+ *                 description: Workflow inputs
+ *     responses:
+ *       200:
+ *         description: Workflow triggered successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Workflow triggered successfully
+ *                 workflow_run_id:
+ *                   type: string
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: GitHub authentication required
+ *       500:
+ *         description: Server error
+ */
+router.post('/workflows/trigger', async (req: any, res: Response) => {
+  try {
+    const { repository, workflow, branch, inputs = {} } = req.body;
+    
+    if (!repository || !workflow || !branch) {
+      return res.status(400).json({
+        success: false,
+        error: 'Repository, workflow, and branch are required'
+      });
+    }
+
+    if (!repository.includes('/')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid repository format. Use owner/repo'
+      });
+    }
+
+    const [owner, repo] = repository.split('/');
+    
+    // Get GitHub token from user's project settings
+    const project = await databaseService.getProjectByRepository(owner, repo);
+    if (!project || !project.githubToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'GitHub token not configured for this repository'
+      });
+    }
+
+    const octokit = new Octokit({
+      auth: project.githubToken
+    });
+
+    // Trigger the workflow
+    const { data: workflowRun } = await octokit.rest.actions.createWorkflowDispatch({
+      owner,
+      repo,
+      workflow_id: workflow,
+      ref: branch,
+      inputs
+    });
+
+    return res.json({
+      success: true,
+      message: 'Workflow triggered successfully',
+      workflow_run_id: workflowRun.id
+    });
+  } catch (error: any) {
+    logger.error('Error triggering GitHub workflow:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to trigger workflow'
     });
   }
 });

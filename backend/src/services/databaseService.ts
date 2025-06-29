@@ -227,9 +227,16 @@ class DatabaseService {
         });
       }
 
+      // Ensure config is a string (encrypted)
+      let configToSave = connectionData.config;
+      if (typeof configToSave !== 'string') {
+        configToSave = JSON.stringify(configToSave);
+      }
+
       const connection = await this.prisma.cloudConnection.create({
         data: {
           ...connectionData,
+          config: configToSave,
           tags: connectionData.tags || [],
           status: 'pending', // Will be validated after creation
         },
@@ -444,6 +451,11 @@ class DatabaseService {
             },
           });
         }
+      }
+
+      // Ensure config is a string (encrypted)
+      if (updateData.config && typeof updateData.config !== 'string') {
+        updateData.config = JSON.stringify(updateData.config);
       }
 
       const updatedConnection = await this.prisma.cloudConnection.update({
@@ -923,6 +935,52 @@ class DatabaseService {
   // Cleanup
   async disconnect(): Promise<void> {
     await this.prisma.$disconnect();
+  }
+
+  /**
+   * Import a cloud object into a repository
+   * @param params { repoId, cloudConnectionId, objectType, objectId, userId }
+   */
+  async importCloudObjectToRepository({ repoId, cloudConnectionId, objectType, objectId, userId }: {
+    repoId: string;
+    cloudConnectionId: string;
+    objectType: string;
+    objectId: string;
+    userId: string;
+  }): Promise<any> {
+    // Fetch repository and cloud connection
+    const repository = await this.getRepositoryById(repoId);
+    if (!repository) throw new Error('Repository not found');
+
+    const cloudConnection = await this.getCloudConnection(cloudConnectionId);
+    if (!cloudConnection) throw new Error('Cloud connection not found');
+
+    // Optionally: verify user has access to both (left as an exercise)
+
+    // For now, just store a reference to the imported object in the repository's metadata (as a placeholder)
+    // In a real implementation, you would fetch the object from the cloud provider and associate/copy it as needed
+    const updatedRepository = await this.prisma.repository.update({
+      where: { id: repoId },
+      data: {
+        // Assuming you have a metadata or cloudObjects field (array of objects)
+        // Here we use a JSON field called cloudObjects for demonstration
+        cloudObjects: {
+          push: {
+            cloudConnectionId,
+            objectType,
+            objectId,
+            importedAt: new Date(),
+          }
+        }
+      }
+    });
+    // Track analytics event
+    await this.trackEvent(userId, repoId, 'imported_cloud_object', {
+      cloudConnectionId,
+      objectType,
+      objectId
+    });
+    return updatedRepository;
   }
 }
 

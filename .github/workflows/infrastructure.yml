@@ -1,0 +1,264 @@
+name: Provision AWS Infrastructure via Deploy.AI
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Infrastructure action'
+        required: true
+        default: 'provision'
+        type: choice
+        options:
+        - provision
+        - destroy
+        - update
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+      cloud_connection_id:
+        description: 'Cloud Connection ID from Deploy.AI'
+        required: true
+        type: string
+      infrastructure_type:
+        description: 'Type of infrastructure to provision'
+        required: true
+        default: 'eks'
+        type: choice
+        options:
+        - eks
+        - ecs
+        - ec2
+        - serverless
+
+env:
+  DEPLOY_AI_API_URL: ${{ secrets.DEPLOY_AI_API_URL || 'https://7e72-77-137-25-91.ngrok-free.app' }}
+  DEPLOY_AI_TOKEN: ${{ secrets.DEPLOY_AI_TOKEN }}
+
+jobs:
+  provision-infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd backend && npm ci
+
+      - name: Run infrastructure analysis
+        run: |
+          echo "Analyzing repository for infrastructure requirements..."
+          
+          # Call Deploy.AI repository analysis API
+          analysis_response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
+            -d '{
+              "repositoryUrl": "${{ github.repositoryUrl }}",
+              "branch": "${{ github.ref_name }}",
+              "analysisType": "infrastructure"
+            }' \
+            "${{ env.DEPLOY_AI_API_URL }}/api/repositories/analyze")
+          
+          echo "Analysis response: $analysis_response"
+          
+          # Extract infrastructure recommendations
+          infrastructure_type=$(echo $analysis_response | jq -r '.recommendations.infrastructure.type // "${{ github.event.inputs.infrastructure_type }}"')
+          echo "infrastructure_type=$infrastructure_type" >> $GITHUB_OUTPUT
+
+      - name: Generate infrastructure configuration
+        run: |
+          echo "Generating infrastructure configuration for ${{ steps.analysis.outputs.infrastructure_type }}..."
+          
+          # Call Deploy.AI infrastructure generation API
+          infra_response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
+            -d '{
+              "repositoryId": "${{ secrets.REPOSITORY_ID }}",
+              "type": "${{ steps.analysis.outputs.infrastructure_type }}",
+              "environment": "${{ github.event.inputs.environment }}",
+              "region": "${{ secrets.AWS_REGION || 'il-central-1' }}",
+              "config": {
+                "clusterName": "deployai-${{ github.event.inputs.environment }}",
+                "nodeGroupName": "deployai-nodes",
+                "instanceType": "t3.medium",
+                "minSize": 1,
+                "maxSize": 3,
+                "desiredSize": 2
+              }
+            }' \
+            "${{ env.DEPLOY_AI_API_URL }}/api/infrastructure/generate")
+          
+          echo "Infrastructure generation response: $infra_response"
+          
+          # Extract infrastructure ID
+          infrastructure_id=$(echo $infra_response | jq -r '.infrastructure.id')
+          echo "infrastructure_id=$infrastructure_id" >> $GITHUB_OUTPUT
+
+      - name: Provision infrastructure
+        if: github.event.inputs.action == 'provision'
+        run: |
+          echo "Provisioning ${{ steps.analysis.outputs.infrastructure_type }} infrastructure..."
+          
+          # Call Deploy.AI infrastructure provisioning API
+          provision_response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
+            -d '{
+              "infrastructureId": "${{ steps.generate.outputs.infrastructure_id }}",
+              "cloudConnectionId": "${{ github.event.inputs.cloud_connection_id }}",
+              "action": "provision",
+              "environment": "${{ github.event.inputs.environment }}",
+              "variables": {
+                "environment": "${{ github.event.inputs.environment }}",
+                "project_name": "deployai",
+                "region": "${{ secrets.AWS_REGION || 'il-central-1' }}"
+              }
+            }' \
+            "${{ env.DEPLOY_AI_API_URL }}/api/infrastructure/provision")
+          
+          echo "Provisioning response: $provision_response"
+          
+          # Extract provisioning job ID
+          job_id=$(echo $provision_response | jq -r '.jobId')
+          echo "job_id=$job_id" >> $GITHUB_OUTPUT
+
+      - name: Update infrastructure
+        if: github.event.inputs.action == 'update'
+        run: |
+          echo "Updating infrastructure..."
+          
+          # Call Deploy.AI infrastructure update API
+          update_response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
+            -d '{
+              "infrastructureId": "${{ steps.generate.outputs.infrastructure_id }}",
+              "cloudConnectionId": "${{ github.event.inputs.cloud_connection_id }}",
+              "action": "update",
+              "environment": "${{ github.event.inputs.environment }}"
+            }' \
+            "${{ env.DEPLOY_AI_API_URL }}/api/infrastructure/provision")
+          
+          echo "Update response: $update_response"
+          
+          job_id=$(echo $update_response | jq -r '.jobId')
+          echo "job_id=$job_id" >> $GITHUB_OUTPUT
+
+      - name: Destroy infrastructure
+        if: github.event.inputs.action == 'destroy'
+        run: |
+          echo "Destroying infrastructure..."
+          
+          # Call Deploy.AI infrastructure destroy API
+          destroy_response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
+            -d '{
+              "infrastructureId": "${{ steps.generate.outputs.infrastructure_id }}",
+              "cloudConnectionId": "${{ github.event.inputs.cloud_connection_id }}",
+              "action": "destroy",
+              "environment": "${{ github.event.inputs.environment }}"
+            }' \
+            "${{ env.DEPLOY_AI_API_URL }}/api/infrastructure/provision")
+          
+          echo "Destroy response: $destroy_response"
+          
+          job_id=$(echo $destroy_response | jq -r '.jobId')
+          echo "job_id=$job_id" >> $GITHUB_OUTPUT
+
+      - name: Wait for infrastructure operation completion
+        run: |
+          job_id="${{ steps.provision.outputs.job_id || steps.update.outputs.job_id || steps.destroy.outputs.job_id }}"
+          max_attempts=60
+          attempt=1
+          
+          while [ $attempt -le $max_attempts ]; do
+            echo "Checking infrastructure operation status (attempt $attempt/$max_attempts)..."
+            
+            status_response=$(curl -s -X GET \
+              -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
+              "${{ env.DEPLOY_AI_API_URL }}/api/infrastructure/jobs/$job_id")
+            
+            status=$(echo $status_response | jq -r '.status')
+            echo "Current status: $status"
+            
+            if [ "$status" = "completed" ]; then
+              echo "✅ Infrastructure operation completed successfully!"
+              cluster_name=$(echo $status_response | jq -r '.output.clusterName // empty')
+              if [ -n "$cluster_name" ]; then
+                echo "Cluster Name: $cluster_name"
+                echo "cluster_name=$cluster_name" >> $GITHUB_OUTPUT
+              fi
+              break
+            elif [ "$status" = "failed" ]; then
+              echo "❌ Infrastructure operation failed!"
+              error_message=$(echo $status_response | jq -r '.error // "Unknown error"')
+              echo "Error: $error_message"
+              exit 1
+            fi
+            
+            sleep 30
+            attempt=$((attempt + 1))
+          done
+          
+          if [ $attempt -gt $max_attempts ]; then
+            echo "❌ Infrastructure operation timed out after $max_attempts attempts"
+            exit 1
+          fi
+
+      - name: Create infrastructure summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const action = '${{ github.event.inputs.action }}';
+            const environment = '${{ github.event.inputs.environment }}';
+            const infrastructureType = '${{ steps.analysis.outputs.infrastructure_type }}';
+            const clusterName = '${{ steps.wait.outputs.cluster_name }}';
+            
+            let summary = `🏗️ **Infrastructure ${action.charAt(0).toUpperCase() + action.slice(1)} Complete**
+            
+            **Action:** ${action}
+            **Environment:** ${environment}
+            **Infrastructure Type:** ${infrastructureType}
+            **Status:** ✅ Success`;
+            
+            if (clusterName) {
+              summary += `\n**Cluster Name:** ${clusterName}`;
+            }
+            
+            summary += `\n\n**Next Steps:**
+            - Infrastructure is ready for application deployment
+            - Use the Deploy.AI platform to deploy your application
+            - Monitor infrastructure health in the Deploy.AI dashboard`;
+            
+            // Create a summary comment
+            github.rest.issues.createComment({
+              issue_number: context.issue.number || 1,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
+            
+            // Update commit status
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              description: `Infrastructure ${action} completed for ${environment}`,
+              context: `Deploy.AI Infrastructure - ${environment}`
+            }); 
