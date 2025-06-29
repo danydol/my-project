@@ -1,265 +1,308 @@
-# GitHub Actions CI/CD with Deploy.AI
+# GitHub Actions CI/CD Pipeline
 
-This directory contains GitHub Actions workflows that integrate with the Deploy.AI platform to provide automated CI/CD, infrastructure provisioning, and quality assurance.
+This repository contains a comprehensive CI/CD pipeline using GitHub Actions for automated testing, building, deployment, and infrastructure management.
 
-## 📋 Workflows Overview
+## 🚀 Workflows Overview
 
-### 1. **deploy.yml** - Application Deployment
-Automatically deploys your application to AWS using Deploy.AI when code is pushed to main/develop branches.
+### 1. **Deploy Application** (`deploy.yml`)
+Automated application deployment with comprehensive validation and security checks.
 
 **Triggers:**
-- Push to `main` branch → Production deployment
-- Push to `develop` branch → Staging deployment
-- Pull requests → Analysis and comments
-- Manual workflow dispatch → Custom environment deployment
+- Push to `main` or `develop` branches
+- Pull requests to `main`
+- Manual workflow dispatch
 
 **Features:**
-- ✅ Automatic environment detection
-- ✅ AWS infrastructure provisioning via Deploy.AI
-- ✅ Deployment status tracking
-- ✅ PR comments with deployment info
-- ✅ Commit status updates
+- ✅ Environment validation
+- 🔒 Security scanning (Trivy, npm audit)
+- 🧪 Comprehensive testing (unit, integration, e2e)
+- 🐳 Multi-platform Docker builds
+- 🌍 Multi-environment deployment (staging/production)
+- 📊 Deployment status tracking
+- 🔄 Auto-rollback capabilities
 
-### 2. **infrastructure.yml** - Infrastructure Management
-Manages AWS infrastructure provisioning, updates, and destruction through Deploy.AI.
+**Manual Inputs:**
+- Environment (staging/production)
+- Cloud connection ID
+- AWS Region (il-central-1, us-east-1, us-west-2, eu-west-1, ap-southeast-1)
+
+### 2. **Infrastructure Provisioning** (`infrastructure.yml`)
+Terraform-based infrastructure management with security and compliance checks.
 
 **Triggers:**
-- Manual workflow dispatch only
+- Changes to `terraform/` or `infrastructure/` directories
+- Pull requests affecting infrastructure
+- Manual workflow dispatch
 
-**Actions:**
-- 🏗️ **Provision** - Create new infrastructure (EKS, ECS, EC2, Serverless)
-- 🔄 **Update** - Update existing infrastructure
-- 🗑️ **Destroy** - Remove infrastructure
+**Features:**
+- 🏗️ Terraform validation and formatting
+- 🔒 Security scanning (Checkov, TFLint)
+- 📋 Plan generation for PRs
+- 🚀 Multi-environment infrastructure
+- 📊 Infrastructure outputs tracking
+- 🗑️ Safe destruction workflows
 
-**Infrastructure Types:**
-- **EKS** - Kubernetes clusters
-- **ECS** - Container orchestration
-- **EC2** - Virtual machines
-- **Serverless** - Lambda functions
+**Manual Inputs:**
+- Environment (staging/production)
+- Action (plan/apply/destroy)
+- AWS Region
 
-### 3. **test.yml** - Quality Assurance
-Comprehensive testing and quality checks before deployment.
+### 3. **Test and Quality Assurance** (`test.yml`)
+Comprehensive testing and quality checks with automated reporting.
 
 **Triggers:**
 - Push to any branch
 - Pull requests
+- Weekly security scans (Mondays 2 AM UTC)
+- Manual workflow dispatch
 
-**Checks:**
-- ✅ Unit tests (Node.js 18 & 20)
-- ✅ Integration tests
-- ✅ E2E tests (Playwright)
-- ✅ Security scans (Trivy, Snyk)
-- ✅ Code coverage
-- ✅ Bundle size analysis
-- ✅ Performance tests
-- ✅ Docker security scans
+**Features:**
+- 🧹 Linting and formatting checks
+- 🔒 Security vulnerability scanning
+- 🧪 Unit, integration, and e2e tests
+- 📊 Code coverage reporting
+- 🚀 Performance testing (Lighthouse, Artillery)
+- 📈 Code quality analysis (SonarQube)
+- 📦 Dependency health checks
+- 🏗️ Build verification
+
+**Manual Inputs:**
+- Test type (all/unit/integration/e2e/security)
+- Test environment (staging/production)
+
+### 4. **Dependency Management** (`dependencies.yml`)
+Automated dependency management and security updates.
+
+**Triggers:**
+- Daily dependency checks (2 AM UTC)
+- Manual workflow dispatch
+
+**Features:**
+- 🔍 Security vulnerability scanning
+- 📦 Outdated dependency detection
+- 🗑️ Unused dependency cleanup
+- 🤖 Automated dependency updates
+- 🔒 Security patch automation
+- 📊 Dependency health reporting
+- 🚨 Critical vulnerability alerts
+
+**Manual Inputs:**
+- Action (check/update/security-fix/audit)
+- Scope (all/production/development/security)
 
 ## 🔧 Configuration
 
-### Required GitHub Secrets
-
-Add these secrets to your GitHub repository (`Settings > Secrets and variables > Actions`):
-
-#### Deploy.AI Configuration
-```bash
-DEPLOY_AI_API_URL=https://7e72-77-137-25-91.ngrok-free.app
-DEPLOY_AI_TOKEN=your_jwt_token_from_deploy_ai
-```
-
-#### Repository Configuration
-```bash
-REPOSITORY_ID=your_repository_id_from_deploy_ai
-DEFAULT_CLOUD_CONNECTION_ID=your_default_aws_connection_id
-```
+### Required Secrets
 
 #### AWS Configuration
 ```bash
-AWS_REGION=il-central-1
+AWS_ACCESS_KEY_ID=your_aws_access_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key
 ```
 
-#### Security Tools (Optional)
+#### Docker Registry
+```bash
+DOCKER_USERNAME=your_docker_username
+DOCKER_PASSWORD=your_docker_password
+```
+
+#### Security Tools
 ```bash
 SNYK_TOKEN=your_snyk_token
-CODECOV_TOKEN=your_codecov_token
+SONAR_TOKEN=your_sonarqube_token
 ```
 
-### How to Get Deploy.AI Token
+#### GitHub Integration
+```bash
+GITHUB_TOKEN=your_github_token  # Usually auto-provided
+```
 
-1. **Login to Deploy.AI Platform**
-   - Access your Deploy.AI instance
-   - Login with GitHub OAuth
+### Environment Variables
 
-2. **Get JWT Token**
-   - Open browser developer tools
-   - Go to Application/Storage tab
-   - Find the JWT token in localStorage
-   - Copy the token value
+#### Global
+- `NODE_VERSION`: Node.js version (default: 18)
+- `TF_VERSION`: Terraform version (default: 1.5.0)
 
-3. **Get Repository ID**
-   - In Deploy.AI dashboard, go to Projects
-   - Select your project
-   - Copy the repository ID from the URL or project details
+#### Deployment
+- `AWS_REGION`: Target AWS region
+- `DEPLOYMENT_ENVIRONMENT`: Target environment
 
-4. **Get Cloud Connection ID**
-   - In Deploy.AI dashboard, go to Cloud Connections
-   - Select your AWS connection
-   - Copy the connection ID
+## 📋 Usage
 
-## 🚀 Usage
+### Manual Workflow Execution
 
-### Automatic Deployment
-
-1. **Push to main branch** → Automatic production deployment
-2. **Push to develop branch** → Automatic staging deployment
-3. **Create pull request** → Analysis and quality checks
-
-### Manual Deployment
-
-1. Go to **Actions** tab in GitHub
-2. Select **Deploy to AWS via Deploy.AI**
-3. Click **Run workflow**
-4. Choose:
+#### Deploy Application
+1. Go to **Actions** → **Deploy Application**
+2. Click **Run workflow**
+3. Select:
    - **Environment**: staging/production
-   - **Cloud Connection ID**: Your AWS connection ID
+   - **Cloud Connection ID**: Your AWS connection
+   - **Region**: Target AWS region
+4. Click **Run workflow**
 
-### Manual Infrastructure Management
-
-1. Go to **Actions** tab in GitHub
-2. Select **Provision AWS Infrastructure via Deploy.AI**
-3. Click **Run workflow**
-4. Choose:
-   - **Action**: provision/update/destroy
+#### Infrastructure Management
+1. Go to **Actions** → **Infrastructure Provisioning**
+2. Click **Run workflow**
+3. Select:
    - **Environment**: staging/production
-   - **Cloud Connection ID**: Your AWS connection ID
-   - **Infrastructure Type**: eks/ecs/ec2/serverless
+   - **Action**: plan/apply/destroy
+   - **Region**: Target AWS region
+4. Click **Run workflow**
 
-## 📊 Monitoring
+#### Run Tests
+1. Go to **Actions** → **Test and Quality Assurance**
+2. Click **Run workflow**
+3. Select:
+   - **Test Type**: all/unit/integration/e2e/security
+   - **Environment**: staging/production
+4. Click **Run workflow**
 
-### Deployment Status
-- Check **Actions** tab for workflow status
-- View deployment logs in real-time
-- Monitor deployment progress
+#### Manage Dependencies
+1. Go to **Actions** → **Dependency Management**
+2. Click **Run workflow**
+3. Select:
+   - **Action**: check/update/security-fix/audit
+   - **Scope**: all/production/development/security
+4. Click **Run workflow**
 
-### Infrastructure Status
-- Track infrastructure provisioning in Deploy.AI dashboard
-- View Terraform logs and outputs
-- Monitor resource creation/destruction
+### Automated Triggers
+
+#### Branch Protection
+- **main**: Triggers production deployments
+- **develop**: Triggers staging deployments
+- **feature/***: Triggers testing and validation
+
+#### Path-based Triggers
+- Infrastructure changes trigger infrastructure workflows
+- Code changes trigger deployment workflows
+- All changes trigger testing workflows
+
+## 🔍 Monitoring and Reporting
+
+### Workflow Status
+- Real-time status in GitHub Actions tab
+- Detailed logs for each step
+- Artifact downloads for test results
+- Security scan reports
 
 ### Quality Gates
-- All tests must pass before deployment
+- All tests must pass
 - Security scans must be clean
-- Code coverage requirements met
-- Bundle size within limits
+- Code quality thresholds met
+- Build verification successful
 
-## 🔒 Security Features
+### Notifications
+- PR comments with test results
+- Issue creation for critical vulnerabilities
+- Deployment status updates
+- Infrastructure change summaries
 
-### Automated Security Scanning
-- **Trivy** - Vulnerability scanning for code and Docker images
-- **Snyk** - Dependency vulnerability scanning
-- **GitHub Security** - Integration with GitHub Security tab
+## 🛡️ Security Features
 
-### Secrets Management
-- All sensitive data stored in GitHub Secrets
-- No hardcoded credentials in workflows
-- Secure token-based authentication
+### Vulnerability Scanning
+- **Trivy**: Container and filesystem scanning
+- **Snyk**: Dependency vulnerability scanning
+- **npm audit**: Package security auditing
+- **Checkov**: Infrastructure security scanning
 
-### Infrastructure Security
-- AWS credentials managed by Deploy.AI
-- Encrypted credential storage
-- Secure Terraform state management
+### Compliance
+- **TFLint**: Terraform best practices
+- **ESLint**: Code quality standards
+- **Prettier**: Code formatting consistency
+- **SonarQube**: Code quality analysis
 
-## 🛠️ Customization
+### Access Control
+- Environment-specific secrets
+- Branch protection rules
+- Required status checks
+- Manual approval for production
 
-### Environment-Specific Configuration
+## 🚀 Deployment Pipeline
 
-You can customize the workflows for different environments:
+### Staging Deployment
+1. **Validation**: Environment and configuration checks
+2. **Security Scan**: Vulnerability assessment
+3. **Testing**: Unit, integration, and e2e tests
+4. **Build**: Multi-platform Docker images
+5. **Deploy**: Infrastructure and application deployment
+6. **Verify**: Health checks and smoke tests
 
-```yaml
-# In deploy.yml
-variables:
-  instance_type: "t3.medium"  # Customize instance type
-  environment: "production"    # Environment-specific variables
-  git_commit_sha: "${{ github.sha }}"
-```
+### Production Deployment
+1. **Staging Validation**: Ensures staging is stable
+2. **Production Checks**: Additional security and compliance
+3. **Deploy**: Production infrastructure and application
+4. **Health Checks**: Comprehensive monitoring
+5. **Rollback**: Automatic rollback on failure
 
-### Custom Infrastructure Types
+## 📊 Metrics and Analytics
 
-Add new infrastructure types in `infrastructure.yml`:
+### Test Coverage
+- Unit test coverage reports
+- Integration test results
+- E2E test success rates
+- Performance test metrics
 
-```yaml
-infrastructure_type:
-  options:
-  - eks
-  - ecs
-  - ec2
-  - serverless
-  - your-custom-type  # Add your custom type
-```
+### Security Metrics
+- Vulnerability counts by severity
+- Dependency health scores
+- Security scan pass rates
+- Compliance status
 
-### Quality Gate Customization
+### Deployment Metrics
+- Deployment frequency
+- Lead time for changes
+- Mean time to recovery
+- Change failure rate
 
-Modify quality gates in `test.yml`:
-
-```yaml
-# Adjust coverage thresholds
-coverage_threshold: 80
-
-# Custom security scan rules
-security_level: moderate
-
-# Bundle size limits
-max_bundle_size: 500KB
-```
-
-## 🐛 Troubleshooting
+## 🔧 Troubleshooting
 
 ### Common Issues
 
-1. **Deployment Fails**
-   - Check AWS credentials in Deploy.AI
-   - Verify cloud connection is active
-   - Review Terraform logs in Deploy.AI dashboard
+#### Workflow Failures
+1. Check the specific job that failed
+2. Review logs for error details
+3. Verify required secrets are configured
+4. Ensure environment variables are set
 
-2. **Tests Fail**
-   - Run tests locally first
-   - Check Node.js version compatibility
-   - Verify all dependencies are installed
+#### Security Scan Failures
+1. Review vulnerability reports
+2. Update vulnerable dependencies
+3. Fix security configuration issues
+4. Re-run security scans
 
-3. **Security Scans Fail**
-   - Update vulnerable dependencies
-   - Review security scan reports
-   - Address high-severity vulnerabilities
-
-4. **Infrastructure Provisioning Fails**
-   - Check AWS region availability
-   - Verify IAM permissions
-   - Review Terraform configuration
+#### Deployment Failures
+1. Check AWS credentials and permissions
+2. Verify infrastructure configuration
+3. Review application logs
+4. Check resource availability
 
 ### Debug Mode
-
-Enable debug logging by adding to workflow:
-
-```yaml
-env:
-  ACTIONS_STEP_DEBUG: true
-  ACTIONS_RUNNER_DEBUG: true
+Enable debug logging by setting the secret:
+```bash
+ACTIONS_STEP_DEBUG=true
 ```
 
 ## 📚 Additional Resources
 
-- [Deploy.AI Documentation](https://your-deploy-ai-instance/docs)
+### Documentation
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [AWS Terraform Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
-- [Trivy Security Scanner](https://aquasecurity.github.io/trivy/)
+- [Terraform Documentation](https://www.terraform.io/docs)
+- [AWS Documentation](https://docs.aws.amazon.com/)
 
-## 🤝 Support
+### Tools
+- [Trivy Security Scanner](https://trivy.dev/)
+- [Snyk Security Platform](https://snyk.io/)
+- [SonarQube Code Quality](https://www.sonarqube.org/)
+- [Checkov Security Scanner](https://www.checkov.io/)
 
-For issues with:
-- **GitHub Actions**: Check workflow logs and GitHub documentation
-- **Deploy.AI Integration**: Review Deploy.AI dashboard and logs
-- **AWS Infrastructure**: Check AWS CloudTrail and Deploy.AI Terraform logs
-- **Security Scans**: Review scan reports and update dependencies
+### Support
+- Create issues for workflow problems
+- Review security advisories
+- Monitor dependency updates
+- Stay updated with best practices
 
 ---
 
-**Note**: This setup provides a complete CI/CD pipeline that integrates your GitHub repository with Deploy.AI for automated AWS deployments and infrastructure management. 
+**Last Updated**: December 2024  
+**Version**: 2.0.0  
+**Maintainer**: Deploy.AI Team 

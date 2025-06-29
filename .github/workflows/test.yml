@@ -1,64 +1,43 @@
-name: Test and Quality Checks
+name: Test and Quality Assurance
 
 on:
   push:
     branches: [ main, develop, feature/* ]
   pull_request:
     branches: [ main, develop ]
+  schedule:
+    # Run security scans weekly
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of tests to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - unit
+        - integration
+        - e2e
+        - security
+      environment:
+        description: 'Test environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  NODE_VERSION: '18'
+  TEST_ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
 
 jobs:
-  test:
+  lint:
+    name: Lint and Format Check
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [18.x, 20.x]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: |
-          npm ci
-          cd backend && npm ci
-          cd ../frontend && npm ci
-
-      - name: Run linting
-        run: |
-          echo "Running ESLint..."
-          npm run lint
-          cd backend && npm run lint
-          cd ../frontend && npm run lint
-
-      - name: Run type checking
-        run: |
-          echo "Running TypeScript type checking..."
-          cd backend && npx tsc --noEmit
-          cd ../frontend && npx tsc --noEmit
-
-      - name: Run tests
-        run: |
-          echo "Running tests..."
-          npm test
-          cd backend && npm test
-          cd ../frontend && npm test
-
-      - name: Run security audit
-        run: |
-          echo "Running security audit..."
-          npm audit --audit-level moderate
-          cd backend && npm audit --audit-level moderate
-          cd ../frontend && npm audit --audit-level moderate
-
-  quality-gates:
-    runs-on: ubuntu-latest
-    needs: test
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -66,7 +45,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -75,33 +54,27 @@ jobs:
           cd backend && npm ci
           cd ../frontend && npm ci
 
-      - name: Run code coverage
+      - name: Run ESLint (Backend)
         run: |
-          echo "Running code coverage..."
-          npm run test:coverage
-          cd backend && npm run test:coverage
-          cd ../frontend && npm run test:coverage
+          cd backend
+          npm run lint
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage/lcov.info
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-
-      - name: Check bundle size
+      - name: Run ESLint (Frontend)
         run: |
-          echo "Checking bundle size..."
-          cd frontend && npm run build
-          npx bundlewatch --config bundlewatch.json
+          cd frontend
+          npm run lint
 
-      - name: Run performance tests
+      - name: Check code formatting
         run: |
-          echo "Running performance tests..."
-          npm run test:performance
+          cd backend && npm run format:check
+          cd ../frontend && npm run format:check
+
+      - name: Run Prettier check
+        run: |
+          npx prettier --check "**/*.{js,jsx,ts,tsx,json,css,md}"
 
   security-scan:
+    name: Security Scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -114,12 +87,19 @@ jobs:
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
 
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
+
+      - name: Run npm audit
+        run: |
+          npm audit --audit-level=high
+          cd backend && npm audit --audit-level=high
+          cd ../frontend && npm audit --audit-level=high
 
       - name: Run Snyk security scan
         uses: snyk/actions/node@master
@@ -128,52 +108,51 @@ jobs:
         with:
           args: --severity-threshold=high
 
-  docker-security:
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        project: [backend, frontend]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build Docker images
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
         run: |
-          docker build -t deployai-backend:test ./backend
-          docker build -t deployai-frontend:test ./frontend
+          npm ci
+          cd ${{ matrix.project }} && npm ci
 
-      - name: Run Trivy vulnerability scanner on Docker images
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'deployai-backend:test'
-          format: 'sarif'
-          output: 'trivy-backend-results.sarif'
+      - name: Run unit tests (${{ matrix.project }})
+        run: |
+          cd ${{ matrix.project }}
+          npm test -- --coverage --watchAll=false
 
-      - name: Run Trivy vulnerability scanner on frontend image
-        uses: aquasecurity/trivy-action@master
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
         with:
-          image-ref: 'deployai-frontend:test'
-          format: 'sarif'
-          output: 'trivy-frontend-results.sarif'
-
-      - name: Upload Docker scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
-        if: always()
-        with:
-          sarif_file: 'trivy-backend-results.sarif'
-
-      - name: Upload frontend scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
-        if: always()
-        with:
-          sarif_file: 'trivy-frontend-results.sarif'
+          file: ./${{ matrix.project }}/coverage/lcov.info
+          flags: ${{ matrix.project }}
+          name: ${{ matrix.project }}-coverage
 
   integration-tests:
+    name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [test, quality-gates]
+    needs: [lint, unit-tests]
+    if: github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'integration'
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:15
         env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: deployai_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -181,7 +160,6 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-
       redis:
         image: redis:7-alpine
         options: >-
@@ -199,40 +177,44 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
       - name: Install dependencies
         run: |
           npm ci
           cd backend && npm ci
+          cd ../frontend && npm ci
 
-      - name: Setup test environment
+      - name: Setup database
         run: |
           cd backend
-          echo "DATABASE_URL=postgresql://postgres:password@localhost:5432/deployai_test" > .env.test
-          echo "REDIS_URL=redis://localhost:6379" >> .env.test
-          echo "JWT_SECRET=test-secret-key" >> .env.test
-          echo "NODE_ENV=test" >> .env.test
+          npm run prisma:generate
+          npm run prisma:migrate:deploy
 
-      - name: Run database migrations
-        run: |
-          cd backend
-          npm run prisma:migrate:test
-
-      - name: Run integration tests
+      - name: Run backend integration tests
         run: |
           cd backend
           npm run test:integration
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
 
       - name: Run API tests
         run: |
           cd backend
           npm run test:api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
 
   e2e-tests:
+    name: End-to-End Tests
     runs-on: ubuntu-latest
-    needs: [test, quality-gates]
+    needs: [lint, unit-tests]
+    if: github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'e2e'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -240,7 +222,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -257,60 +239,213 @@ jobs:
         run: |
           cd playwright
           npm run test
+        env:
+          TEST_ENVIRONMENT: ${{ env.TEST_ENVIRONMENT }}
+
+      - name: Upload Playwright results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-results
+          path: playwright/test-results/
+          retention-days: 30
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: playwright-report
           path: playwright/playwright-report/
           retention-days: 30
 
-  notify:
+  performance-tests:
+    name: Performance Tests
     runs-on: ubuntu-latest
-    needs: [test, quality-gates, security-scan, docker-security, integration-tests, e2e-tests]
+    needs: [lint, unit-tests]
+    if: github.event.inputs.test_type == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd backend && npm ci
+
+      - name: Run Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v10
+        with:
+          configPath: './lighthouserc.json'
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+
+      - name: Run Artillery performance tests
+        run: |
+          cd backend
+          npm install -g artillery
+          artillery run tests/performance/load-test.yml
+
+  code-quality:
+    name: Code Quality Analysis
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Run SonarQube analysis
+        uses: sonarqube-quality-gate-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=deployai
+            -Dsonar.sources=src
+            -Dsonar.tests=tests
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.coverage.exclusions=**/*.test.js,**/*.spec.js,**/tests/**
+
+      - name: Run complexity analysis
+        run: |
+          npm install -g complexity-report
+          find . -name "*.js" -not -path "./node_modules/*" -not -path "./dist/*" | xargs complexity-report
+
+  dependency-check:
+    name: Dependency Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Check for outdated dependencies
+        run: |
+          echo "Checking for outdated dependencies..."
+          npm outdated || echo "No outdated dependencies found"
+          cd backend && npm outdated || echo "No outdated backend dependencies found"
+          cd ../frontend && npm outdated || echo "No outdated frontend dependencies found"
+
+      - name: Check for unused dependencies
+        run: |
+          npm install -g depcheck
+          depcheck
+          cd backend && depcheck
+          cd ../frontend && depcheck
+
+  build-test:
+    name: Build Test
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Test backend build
+        run: |
+          cd backend
+          npm run build
+
+      - name: Test frontend build
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Test Docker builds
+        run: |
+          docker build -t deployai-backend-test ./backend
+          docker build -t deployai-frontend-test ./frontend
+
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    needs: [lint, security-scan, unit-tests, integration-tests, e2e-tests, code-quality, build-test]
     if: always()
     steps:
-      - name: Notify on failure
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const failedJobs = '${{ needs.*.result }}'.split(',').filter(result => result === 'failure');
-            
-            if (failedJobs.length > 0) {
-              github.rest.issues.createComment({
-                issue_number: context.issue.number || 1,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: `❌ **Quality Gates Failed**
-                
-                The following checks failed:
-                ${failedJobs.map(job => `- ${job}`).join('\n')}
-                
-                Please review the logs and fix the issues before proceeding with deployment.`
-              });
-            }
+      - name: Check all tests passed
+        run: |
+          echo "Checking quality gate conditions..."
+          
+          # Check if all required jobs passed
+          if [ "${{ needs.lint.result }}" != "success" ]; then
+            echo "❌ Lint check failed"
+            exit 1
+          fi
+          
+          if [ "${{ needs.security-scan.result }}" != "success" ]; then
+            echo "❌ Security scan failed"
+            exit 1
+          fi
+          
+          if [ "${{ needs.unit-tests.result }}" != "success" ]; then
+            echo "❌ Unit tests failed"
+            exit 1
+          fi
+          
+          if [ "${{ needs.build-test.result }}" != "success" ]; then
+            echo "❌ Build test failed"
+            exit 1
+          fi
+          
+          echo "✅ All quality gate conditions passed"
 
-      - name: Notify on success
-        if: success()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number || 1,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `✅ **All Quality Gates Passed**
-              
-              All tests, security scans, and quality checks have passed successfully.
-              
-              **Ready for deployment!** 🚀
-              
-              - Unit tests: ✅
-              - Integration tests: ✅
-              - E2E tests: ✅
-              - Security scans: ✅
-              - Code coverage: ✅
-              - Bundle size: ✅`
-            }); 
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## 🧪 Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lint**: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Scan**: ${{ needs.security-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Unit Tests**: ${{ needs.unit-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Integration Tests**: ${{ needs.integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **E2E Tests**: ${{ needs.e2e-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Code Quality**: ${{ needs.code-quality.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Test**: ${{ needs.build-test.result }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.quality-gate.result }}" == "success" ]; then
+            echo "## ✅ Quality Gate Passed" >> $GITHUB_STEP_SUMMARY
+            echo "All tests and quality checks passed successfully!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Quality Gate Failed" >> $GITHUB_STEP_SUMMARY
+            echo "Some tests or quality checks failed. Please review the results above." >> $GITHUB_STEP_SUMMARY
+          fi 

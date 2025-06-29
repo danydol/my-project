@@ -1,0 +1,352 @@
+name: Dependency Management
+
+on:
+  schedule:
+    # Run dependency checks daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Dependency action to perform'
+        required: true
+        default: 'check'
+        type: choice
+        options:
+        - check
+        - update
+        - security-fix
+        - audit
+      scope:
+        description: 'Scope of dependencies to check'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - production
+        - development
+        - security
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  dependency-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Run npm audit
+        run: |
+          echo "Running npm audit for all projects..."
+          npm audit --audit-level=moderate --json > audit-results.json || true
+          cd backend && npm audit --audit-level=moderate --json > ../backend-audit-results.json || true
+          cd ../frontend && npm audit --audit-level=moderate --json > ../frontend-audit-results.json || true
+
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --json-file-output=snyk-results.json
+
+      - name: Upload security results
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit-results
+          path: |
+            audit-results.json
+            backend-audit-results.json
+            frontend-audit-results.json
+            snyk-results.json
+          retention-days: 30
+
+  dependency-check:
+    name: Dependency Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Check for outdated dependencies
+        run: |
+          echo "Checking for outdated dependencies..."
+          
+          # Root dependencies
+          echo "## Root Dependencies" > dependency-report.md
+          npm outdated --json >> dependency-report.md || echo "No outdated root dependencies" >> dependency-report.md
+          
+          # Backend dependencies
+          echo "## Backend Dependencies" >> dependency-report.md
+          cd backend && npm outdated --json >> ../dependency-report.md || echo "No outdated backend dependencies" >> ../dependency-report.md
+          
+          # Frontend dependencies
+          echo "## Frontend Dependencies" >> dependency-report.md
+          cd ../frontend && npm outdated --json >> ../dependency-report.md || echo "No outdated frontend dependencies" >> ../dependency-report.md
+
+      - name: Check for unused dependencies
+        run: |
+          echo "Checking for unused dependencies..."
+          
+          # Install depcheck globally
+          npm install -g depcheck
+          
+          # Check root
+          echo "## Root Unused Dependencies" >> unused-deps-report.md
+          depcheck >> unused-deps-report.md || echo "No unused dependencies found in root" >> unused-deps-report.md
+          
+          # Check backend
+          echo "## Backend Unused Dependencies" >> unused-deps-report.md
+          cd backend && depcheck >> ../unused-deps-report.md || echo "No unused dependencies found in backend" >> ../unused-deps-report.md
+          
+          # Check frontend
+          echo "## Frontend Unused Dependencies" >> unused-deps-report.md
+          cd ../frontend && depcheck >> ../unused-deps-report.md || echo "No unused dependencies found in frontend" >> ../unused-deps-report.md
+
+      - name: Upload dependency reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-reports
+          path: |
+            dependency-report.md
+            unused-deps-report.md
+          retention-days: 30
+
+  auto-update-dependencies:
+    name: Auto Update Dependencies
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'update'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Update dependencies
+        run: |
+          echo "Updating dependencies..."
+          
+          # Update root dependencies
+          npm update
+          
+          # Update backend dependencies
+          cd backend
+          npm update
+          
+          # Update frontend dependencies
+          cd ../frontend
+          npm update
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: update dependencies'
+          title: '🤖 Automated Dependency Updates'
+          body: |
+            ## Automated Dependency Updates
+            
+            This PR contains automated updates to project dependencies.
+            
+            ### Changes:
+            - Updated npm packages to latest compatible versions
+            - Backend dependencies updated
+            - Frontend dependencies updated
+            
+            ### Next Steps:
+            - [ ] Review the changes
+            - [ ] Run tests to ensure compatibility
+            - [ ] Merge if all tests pass
+            
+            ---
+            *This PR was automatically generated by GitHub Actions*
+          branch: 'deps/auto-update-$(date +%Y%m%d)'
+          delete-branch: true
+
+  security-updates:
+    name: Security Updates
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'security-fix'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Fix security vulnerabilities
+        run: |
+          echo "Fixing security vulnerabilities..."
+          
+          # Fix root vulnerabilities
+          npm audit fix
+          
+          # Fix backend vulnerabilities
+          cd backend
+          npm audit fix
+          
+          # Fix frontend vulnerabilities
+          cd ../frontend
+          npm audit fix
+
+      - name: Create Security Fix PR
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'fix: security vulnerabilities'
+          title: '🔒 Security Vulnerability Fixes'
+          body: |
+            ## Security Vulnerability Fixes
+            
+            This PR contains fixes for security vulnerabilities found in dependencies.
+            
+            ### Changes:
+            - Fixed security vulnerabilities in npm packages
+            - Updated vulnerable dependencies to secure versions
+            - Applied security patches
+            
+            ### Security Impact:
+            - Resolves known security vulnerabilities
+            - Improves overall security posture
+            
+            ---
+            *This PR was automatically generated by GitHub Actions*
+          branch: 'security/fix-vulnerabilities-$(date +%Y%m%d)'
+          delete-branch: true
+
+  dependency-monitoring:
+    name: Dependency Monitoring
+    runs-on: ubuntu-latest
+    needs: [dependency-audit, dependency-check]
+    if: always()
+    steps:
+      - name: Download dependency reports
+        uses: actions/download-artifact@v4
+        with:
+          name: dependency-reports
+          path: ./reports
+
+      - name: Download security results
+        uses: actions/download-artifact@v4
+        with:
+          name: security-audit-results
+          path: ./security
+
+      - name: Generate dependency summary
+        run: |
+          echo "## 📦 Dependency Management Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Security Status:" >> $GITHUB_STEP_SUMMARY
+          echo "- **npm audit**: ${{ needs.dependency-audit.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Snyk scan**: ${{ needs.dependency-audit.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Dependency Status:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Outdated deps check**: ${{ needs.dependency-check.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Unused deps check**: ${{ needs.dependency-check.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "./reports/dependency-report.md" ]; then
+            echo "### Outdated Dependencies:" >> $GITHUB_STEP_SUMMARY
+            cat ./reports/dependency-report.md >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f "./reports/unused-deps-report.md" ]; then
+            echo "### Unused Dependencies:" >> $GITHUB_STEP_SUMMARY
+            cat ./reports/unused-deps-report.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Create issue for critical vulnerabilities
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Check if there are critical vulnerabilities
+            let hasCriticalVulns = false;
+            
+            try {
+              if (fs.existsSync('./security/audit-results.json')) {
+                const auditResults = JSON.parse(fs.readFileSync('./security/audit-results.json', 'utf8'));
+                hasCriticalVulns = auditResults.metadata.vulnerabilities.critical > 0;
+              }
+            } catch (error) {
+              console.log('Could not parse audit results');
+            }
+            
+            if (hasCriticalVulns) {
+              github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🚨 Critical Security Vulnerabilities Detected',
+                body: `## Critical Security Vulnerabilities Found
+                
+                Automated dependency scanning has detected critical security vulnerabilities in the project dependencies.
+                
+                ### Action Required:
+                - [ ] Review the security audit results
+                - [ ] Update vulnerable dependencies
+                - [ ] Test the application after updates
+                - [ ] Deploy security fixes
+                
+                ### Next Steps:
+                1. Check the workflow run for detailed vulnerability information
+                2. Run \`npm audit fix\` to automatically fix vulnerabilities
+                3. Manually review and update any remaining issues
+                4. Run full test suite to ensure compatibility
+                
+                ---
+                *This issue was automatically created by GitHub Actions*`,
+                labels: ['security', 'dependencies', 'critical'],
+                assignees: ['${{ github.repository_owner }}']
+              });
+            } 

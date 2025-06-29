@@ -1,264 +1,423 @@
-name: Provision AWS Infrastructure via Deploy.AI
+name: Infrastructure Provisioning
 
 on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'terraform/**'
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'terraform/**'
+      - 'infrastructure/**'
   workflow_dispatch:
     inputs:
-      action:
-        description: 'Infrastructure action'
-        required: true
-        default: 'provision'
-        type: choice
-        options:
-        - provision
-        - destroy
-        - update
       environment:
-        description: 'Environment'
+        description: 'Environment to provision'
         required: true
         default: 'staging'
         type: choice
         options:
         - staging
         - production
-      cloud_connection_id:
-        description: 'Cloud Connection ID from Deploy.AI'
+      action:
+        description: 'Terraform action'
         required: true
-        type: string
-      infrastructure_type:
-        description: 'Type of infrastructure to provision'
-        required: true
-        default: 'eks'
+        default: 'plan'
         type: choice
         options:
-        - eks
-        - ecs
-        - ec2
-        - serverless
+        - plan
+        - apply
+        - destroy
+      region:
+        description: 'AWS Region'
+        required: true
+        default: 'il-central-1'
+        type: choice
+        options:
+        - il-central-1
+        - us-east-1
+        - us-west-2
+        - eu-west-1
+        - ap-southeast-1
 
 env:
-  DEPLOY_AI_API_URL: ${{ secrets.DEPLOY_AI_API_URL || 'https://7e72-77-137-25-91.ngrok-free.app' }}
-  DEPLOY_AI_TOKEN: ${{ secrets.DEPLOY_AI_TOKEN }}
+  TF_VERSION: '1.5.0'
+  AWS_REGION: ${{ github.event.inputs.region || 'il-central-1' }}
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
+  TF_ACTION: ${{ github.event.inputs.action || 'plan' }}
 
 jobs:
-  provision-infrastructure:
+  validate:
+    name: Validate Infrastructure
     runs-on: ubuntu-latest
+    outputs:
+      should-provision: ${{ steps.validate.outputs.should-provision }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          node-version: '18'
-          cache: 'npm'
+          terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Install dependencies
+      - name: Validate Terraform configuration
+        id: validate
         run: |
-          npm ci
-          cd backend && npm ci
-
-      - name: Run infrastructure analysis
-        run: |
-          echo "Analyzing repository for infrastructure requirements..."
+          echo "Validating Terraform configuration..."
           
-          # Call Deploy.AI repository analysis API
-          analysis_response=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
-            -d '{
-              "repositoryUrl": "${{ github.repositoryUrl }}",
-              "branch": "${{ github.ref_name }}",
-              "analysisType": "infrastructure"
-            }' \
-            "${{ env.DEPLOY_AI_API_URL }}/api/repositories/analyze")
+          # Check if Terraform files exist
+          if [ ! -d "terraform" ] && [ ! -d "infrastructure" ]; then
+            echo "❌ No Terraform configuration found"
+            echo "should-provision=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
           
-          echo "Analysis response: $analysis_response"
-          
-          # Extract infrastructure recommendations
-          infrastructure_type=$(echo $analysis_response | jq -r '.recommendations.infrastructure.type // "${{ github.event.inputs.infrastructure_type }}"')
-          echo "infrastructure_type=$infrastructure_type" >> $GITHUB_OUTPUT
-
-      - name: Generate infrastructure configuration
-        run: |
-          echo "Generating infrastructure configuration for ${{ steps.analysis.outputs.infrastructure_type }}..."
-          
-          # Call Deploy.AI infrastructure generation API
-          infra_response=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
-            -d '{
-              "repositoryId": "${{ secrets.REPOSITORY_ID }}",
-              "type": "${{ steps.analysis.outputs.infrastructure_type }}",
-              "environment": "${{ github.event.inputs.environment }}",
-              "region": "${{ secrets.AWS_REGION || 'il-central-1' }}",
-              "config": {
-                "clusterName": "deployai-${{ github.event.inputs.environment }}",
-                "nodeGroupName": "deployai-nodes",
-                "instanceType": "t3.medium",
-                "minSize": 1,
-                "maxSize": 3,
-                "desiredSize": 2
-              }
-            }' \
-            "${{ env.DEPLOY_AI_API_URL }}/api/infrastructure/generate")
-          
-          echo "Infrastructure generation response: $infra_response"
-          
-          # Extract infrastructure ID
-          infrastructure_id=$(echo $infra_response | jq -r '.infrastructure.id')
-          echo "infrastructure_id=$infrastructure_id" >> $GITHUB_OUTPUT
-
-      - name: Provision infrastructure
-        if: github.event.inputs.action == 'provision'
-        run: |
-          echo "Provisioning ${{ steps.analysis.outputs.infrastructure_type }} infrastructure..."
-          
-          # Call Deploy.AI infrastructure provisioning API
-          provision_response=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
-            -d '{
-              "infrastructureId": "${{ steps.generate.outputs.infrastructure_id }}",
-              "cloudConnectionId": "${{ github.event.inputs.cloud_connection_id }}",
-              "action": "provision",
-              "environment": "${{ github.event.inputs.environment }}",
-              "variables": {
-                "environment": "${{ github.event.inputs.environment }}",
-                "project_name": "deployai",
-                "region": "${{ secrets.AWS_REGION || 'il-central-1' }}"
-              }
-            }' \
-            "${{ env.DEPLOY_AI_API_URL }}/api/infrastructure/provision")
-          
-          echo "Provisioning response: $provision_response"
-          
-          # Extract provisioning job ID
-          job_id=$(echo $provision_response | jq -r '.jobId')
-          echo "job_id=$job_id" >> $GITHUB_OUTPUT
-
-      - name: Update infrastructure
-        if: github.event.inputs.action == 'update'
-        run: |
-          echo "Updating infrastructure..."
-          
-          # Call Deploy.AI infrastructure update API
-          update_response=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
-            -d '{
-              "infrastructureId": "${{ steps.generate.outputs.infrastructure_id }}",
-              "cloudConnectionId": "${{ github.event.inputs.cloud_connection_id }}",
-              "action": "update",
-              "environment": "${{ github.event.inputs.environment }}"
-            }' \
-            "${{ env.DEPLOY_AI_API_URL }}/api/infrastructure/provision")
-          
-          echo "Update response: $update_response"
-          
-          job_id=$(echo $update_response | jq -r '.jobId')
-          echo "job_id=$job_id" >> $GITHUB_OUTPUT
-
-      - name: Destroy infrastructure
-        if: github.event.inputs.action == 'destroy'
-        run: |
-          echo "Destroying infrastructure..."
-          
-          # Call Deploy.AI infrastructure destroy API
-          destroy_response=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
-            -d '{
-              "infrastructureId": "${{ steps.generate.outputs.infrastructure_id }}",
-              "cloudConnectionId": "${{ github.event.inputs.cloud_connection_id }}",
-              "action": "destroy",
-              "environment": "${{ github.event.inputs.environment }}"
-            }' \
-            "${{ env.DEPLOY_AI_API_URL }}/api/infrastructure/provision")
-          
-          echo "Destroy response: $destroy_response"
-          
-          job_id=$(echo $destroy_response | jq -r '.jobId')
-          echo "job_id=$job_id" >> $GITHUB_OUTPUT
-
-      - name: Wait for infrastructure operation completion
-        run: |
-          job_id="${{ steps.provision.outputs.job_id || steps.update.outputs.job_id || steps.destroy.outputs.job_id }}"
-          max_attempts=60
-          attempt=1
-          
-          while [ $attempt -le $max_attempts ]; do
-            echo "Checking infrastructure operation status (attempt $attempt/$max_attempts)..."
+          # Find Terraform directories
+          find . -name "*.tf" -type f | head -1 | while read file; do
+            tf_dir=$(dirname "$file")
+            echo "Found Terraform configuration in: $tf_dir"
             
-            status_response=$(curl -s -X GET \
-              -H "Authorization: Bearer ${{ env.DEPLOY_AI_TOKEN }}" \
-              "${{ env.DEPLOY_AI_API_URL }}/api/infrastructure/jobs/$job_id")
+            cd "$tf_dir"
             
-            status=$(echo $status_response | jq -r '.status')
-            echo "Current status: $status"
+            # Initialize Terraform
+            terraform init -backend=false
             
-            if [ "$status" = "completed" ]; then
-              echo "✅ Infrastructure operation completed successfully!"
-              cluster_name=$(echo $status_response | jq -r '.output.clusterName // empty')
-              if [ -n "$cluster_name" ]; then
-                echo "Cluster Name: $cluster_name"
-                echo "cluster_name=$cluster_name" >> $GITHUB_OUTPUT
-              fi
-              break
-            elif [ "$status" = "failed" ]; then
-              echo "❌ Infrastructure operation failed!"
-              error_message=$(echo $status_response | jq -r '.error // "Unknown error"')
-              echo "Error: $error_message"
-              exit 1
-            fi
+            # Validate configuration
+            terraform validate
             
-            sleep 30
-            attempt=$((attempt + 1))
+            # Format check
+            terraform fmt -check
+            
+            echo "✅ Terraform validation passed for $tf_dir"
           done
           
-          if [ $attempt -gt $max_attempts ]; then
-            echo "❌ Infrastructure operation timed out after $max_attempts attempts"
-            exit 1
-          fi
+          echo "should-provision=true" >> $GITHUB_OUTPUT
 
-      - name: Create infrastructure summary
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: validate
+    if: needs.validate.outputs.should-provision == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov security scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform/
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          soft_fail: true
+
+      - name: Upload Checkov scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+      - name: Run TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.44.1
+
+      - name: Run TFLint
+        run: |
+          cd terraform
+          tflint --init
+          tflint
+
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: [validate, security-scan]
+    if: |
+      needs.validate.outputs.should-provision == 'true' && 
+      (github.event_name == 'pull_request' || env.TF_ACTION == 'plan')
+    environment: ${{ env.ENVIRONMENT }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform backend
+        run: |
+          cd terraform
+          
+          # Configure backend for the environment
+          cat > backend.tf << EOF
+          terraform {
+            backend "s3" {
+              bucket = "deployai-terraform-state-${{ env.ENVIRONMENT }}"
+              key    = "terraform.tfstate"
+              region = "${{ env.AWS_REGION }}"
+            }
+          }
+          EOF
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          cd terraform
+          
+          # Set environment-specific variables
+          export TF_VAR_environment="${{ env.ENVIRONMENT }}"
+          export TF_VAR_region="${{ env.AWS_REGION }}"
+          export TF_VAR_project_name="deployai"
+          export TF_VAR_git_commit_sha="${{ github.sha }}"
+          export TF_VAR_git_branch="${{ github.ref_name }}"
+          
+          # Run plan
+          terraform plan -out=tfplan
+          
+          # Save plan for apply job
+          terraform show -no-color tfplan > plan.txt
+
+      - name: Comment PR
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
-            const action = '${{ github.event.inputs.action }}';
-            const environment = '${{ github.event.inputs.environment }}';
-            const infrastructureType = '${{ steps.analysis.outputs.infrastructure_type }}';
-            const clusterName = '${{ steps.wait.outputs.cluster_name }}';
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/plan.txt', 'utf8');
             
-            let summary = `🏗️ **Infrastructure ${action.charAt(0).toUpperCase() + action.slice(1)} Complete**
+            const comment = `## 🏗️ Terraform Plan
             
-            **Action:** ${action}
-            **Environment:** ${environment}
-            **Infrastructure Type:** ${infrastructureType}
-            **Status:** ✅ Success`;
+            **Environment:** ${{ env.ENVIRONMENT }}
+            **Region:** ${{ env.AWS_REGION }}
+            **Action:** Plan
             
-            if (clusterName) {
-              summary += `\n**Cluster Name:** ${clusterName}`;
-            }
+            <details>
+            <summary>📋 Plan Output</summary>
             
-            summary += `\n\n**Next Steps:**
-            - Infrastructure is ready for application deployment
-            - Use the Deploy.AI platform to deploy your application
-            - Monitor infrastructure health in the Deploy.AI dashboard`;
+            \`\`\`hcl
+            ${plan}
+            \`\`\`
             
-            // Create a summary comment
+            </details>
+            
+            ---
+            *This plan was generated for commit \`${{ github.sha }}\`*`;
+            
             github.rest.issues.createComment({
-              issue_number: context.issue.number || 1,
+              issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: summary
+              body: comment
             });
+
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: [validate, security-scan, plan]
+    if: |
+      needs.validate.outputs.should-provision == 'true' && 
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') &&
+      env.TF_ACTION == 'apply'
+    environment: ${{ env.ENVIRONMENT }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform backend
+        run: |
+          cd terraform
+          
+          # Configure backend for the environment
+          cat > backend.tf << EOF
+          terraform {
+            backend "s3" {
+              bucket = "deployai-terraform-state-${{ env.ENVIRONMENT }}"
+              key    = "terraform.tfstate"
+              region = "${{ env.AWS_REGION }}"
+            }
+          }
+          EOF
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Terraform Apply
+        run: |
+          cd terraform
+          
+          # Set environment-specific variables
+          export TF_VAR_environment="${{ env.ENVIRONMENT }}"
+          export TF_VAR_region="${{ env.AWS_REGION }}"
+          export TF_VAR_project_name="deployai"
+          export TF_VAR_git_commit_sha="${{ github.sha }}"
+          export TF_VAR_git_branch="${{ github.ref_name }}"
+          
+          # Apply changes
+          terraform apply -auto-approve
+
+      - name: Get outputs
+        id: outputs
+        run: |
+          cd terraform
+          
+          # Get Terraform outputs
+          terraform output -json > outputs.json
+          
+          # Extract important outputs
+          if [ -f outputs.json ]; then
+            echo "outputs=$(cat outputs.json)" >> $GITHUB_OUTPUT
             
-            // Update commit status
-            github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: context.sha,
-              state: 'success',
-              description: `Infrastructure ${action} completed for ${environment}`,
-              context: `Deploy.AI Infrastructure - ${environment}`
-            }); 
+            # Extract specific values if they exist
+            alb_dns_name=$(terraform output -raw alb_dns_name 2>/dev/null || echo "")
+            rds_endpoint=$(terraform output -raw rds_endpoint 2>/dev/null || echo "")
+            
+            if [ ! -z "$alb_dns_name" ]; then
+              echo "alb_dns_name=$alb_dns_name" >> $GITHUB_OUTPUT
+            fi
+            
+            if [ ! -z "$rds_endpoint" ]; then
+              echo "rds_endpoint=$rds_endpoint" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Update deployment status
+        run: |
+          echo "## 🚀 Infrastructure Deployed Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Action**: Apply" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ ! -z "${{ steps.outputs.outputs.alb_dns_name }}" ]; then
+            echo "- **Load Balancer**: ${{ steps.outputs.outputs.alb_dns_name }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ ! -z "${{ steps.outputs.outputs.rds_endpoint }}" ]; then
+            echo "- **Database**: ${{ steps.outputs.outputs.rds_endpoint }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    needs: [validate]
+    if: |
+      needs.validate.outputs.should-provision == 'true' && 
+      env.TF_ACTION == 'destroy'
+    environment: ${{ env.ENVIRONMENT }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform backend
+        run: |
+          cd terraform
+          
+          # Configure backend for the environment
+          cat > backend.tf << EOF
+          terraform {
+            backend "s3" {
+              bucket = "deployai-terraform-state-${{ env.ENVIRONMENT }}"
+              key    = "terraform.tfstate"
+              region = "${{ env.AWS_REGION }}"
+            }
+          }
+          EOF
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Terraform Destroy
+        run: |
+          cd terraform
+          
+          # Set environment-specific variables
+          export TF_VAR_environment="${{ env.ENVIRONMENT }}"
+          export TF_VAR_region="${{ env.AWS_REGION }}"
+          export TF_VAR_project_name="deployai"
+          export TF_VAR_git_commit_sha="${{ github.sha }}"
+          export TF_VAR_git_branch="${{ github.ref_name }}"
+          
+          # Destroy infrastructure
+          terraform destroy -auto-approve
+
+      - name: Update destruction status
+        run: |
+          echo "## 🗑️ Infrastructure Destroyed Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Action**: Destroy" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+  post-provisioning:
+    name: Post-Provisioning Tasks
+    runs-on: ubuntu-latest
+    needs: [apply, destroy]
+    if: always()
+    steps:
+      - name: Update infrastructure status
+        run: |
+          echo "Updating infrastructure status..."
+          # Add any post-provisioning tasks here
+          # Example: Update monitoring, send notifications, etc.
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up temporary resources..."
+          # Add cleanup tasks here
+
+      - name: Infrastructure Summary
+        if: always()
+        run: |
+          echo "## 🏗️ Infrastructure Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Action**: ${{ env.TF_ACTION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ needs.apply.result || needs.destroy.result }}" >> $GITHUB_STEP_SUMMARY 
