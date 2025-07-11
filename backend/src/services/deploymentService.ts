@@ -10,6 +10,7 @@ import { decryptCredentials } from './cloudService';
 const execAsync = promisify(exec);
 
 interface DeploymentConfig {
+  projectId?: string;
   repositoryId: string;
   cloudConnectionId: string;
   environment: string;
@@ -51,9 +52,28 @@ class DeploymentService {
         throw new Error('Repository or cloud connection not found');
       }
 
+      // If projectId is provided, verify the user has access to the project
+      if (config.projectId) {
+        const project = await databaseService.findProjectById(config.projectId);
+        if (!project || project.userId !== userId) {
+          throw new Error('Project not found or access denied');
+        }
+        
+        // Verify repository belongs to the project
+        if (repository.projectId !== config.projectId) {
+          throw new Error('Repository does not belong to the specified project');
+        }
+        
+        // Verify cloud connection belongs to the project
+        if (cloudConnection.projectId !== config.projectId) {
+          throw new Error('Cloud connection does not belong to the specified project');
+        }
+      }
+
       // Create deployment record
       const deployment = await databaseService.createDeployment({
         userId,
+        projectId: config.projectId,
         repositoryId: config.repositoryId,
         cloudConnectionId: config.cloudConnectionId,
         name: `${repository.name}-${config.environment}`,
@@ -153,11 +173,12 @@ class DeploymentService {
    */
   private async setupAWSCredentials(cloudConnection: any, workspacePath: string): Promise<void> {
     try {
-      // Decrypt credentials
-      const credentials = await decryptCredentials(cloudConnection.encryptedCredentials);
+      // Decrypt credentials from the config field
+      const credentials = await decryptCredentials(cloudConnection.config);
       
-      // Create AWS credentials file
-      const awsDir = path.join(workspacePath, '.aws');
+      // Create AWS credentials file in the terraform directory where Terraform will run
+      const terraformDir = path.join(workspacePath, 'terraform');
+      const awsDir = path.join(terraformDir, '.aws');
       fs.mkdirSync(awsDir, { recursive: true });
 
       const credentialsContent = `[default]
@@ -177,7 +198,7 @@ output = json
       process.env.AWS_PROFILE = 'default';
       process.env.AWS_DEFAULT_REGION = cloudConnection.region;
 
-      logger.info('AWS credentials configured', { workspacePath });
+      logger.info('AWS credentials configured', { terraformDir });
     } catch (error) {
       logger.error('Error setting up AWS credentials', error);
       throw new Error('Failed to configure AWS credentials');
@@ -723,6 +744,94 @@ ec2_volume_size = 20
   }
 
   /**
+   * Sanitize resource name for Terraform
+   * Terraform resource names must start with a letter or underscore and contain only letters, digits, underscores, and dashes
+   */
+  private sanitizeResourceName(resourceName: string): string {
+    // Remove any file extensions
+    let sanitized = resourceName.replace(/\.[^/.]+$/, '');
+    
+    // Replace dots, spaces, and other invalid characters with underscores
+    sanitized = sanitized.replace(/[^a-zA-Z0-9_-]/g, '_');
+    
+    // Ensure it starts with a letter or underscore
+    if (!/^[a-zA-Z_]/.test(sanitized)) {
+      sanitized = 'resource_' + sanitized;
+    }
+    
+    // Remove consecutive underscores
+    sanitized = sanitized.replace(/_+/g, '_');
+    
+    // Remove leading/trailing underscores
+    sanitized = sanitized.replace(/^_+|_+$/g, '');
+    
+    // Ensure it's not empty
+    if (!sanitized) {
+      sanitized = 'resource';
+    }
+    
+    logger.info(`Sanitized resource name: '${resourceName}' -> '${sanitized}'`);
+    return sanitized;
+  }
+
+  /**
+   * Map common resource types to Terraform resource names
+   */
+  private mapResourceType(resourceType: string): string {
+    // Clean up the resource type - remove any extra text in parentheses and spaces
+    let cleanedType = resourceType.trim();
+    
+    // Remove text in parentheses like "(EC2)" from "aws_instance (EC2)"
+    cleanedType = cleanedType.replace(/\s*\([^)]*\)/g, '');
+    
+    // Remove any extra spaces
+    cleanedType = cleanedType.replace(/\s+/g, '');
+    
+    const resourceTypeMap: Record<string, string> = {
+      'ec2': 'aws_instance',
+      'instance': 'aws_instance',
+      'vm': 'aws_instance',
+      's3': 'aws_s3_bucket',
+      'bucket': 'aws_s3_bucket',
+      'vpc': 'aws_vpc',
+      'subnet': 'aws_subnet',
+      'security-group': 'aws_security_group',
+      'sg': 'aws_security_group',
+      'rds': 'aws_db_instance',
+      'database': 'aws_db_instance',
+      'lambda': 'aws_lambda_function',
+      'function': 'aws_lambda_function',
+      'elb': 'aws_lb',
+      'load-balancer': 'aws_lb',
+      'alb': 'aws_lb',
+      'nlb': 'aws_lb',
+      'iam-role': 'aws_iam_role',
+      'role': 'aws_iam_role',
+      'iam-user': 'aws_iam_user',
+      'user': 'aws_iam_user',
+      'iam-policy': 'aws_iam_policy',
+      'policy': 'aws_iam_policy'
+    };
+
+    // If the resource type is already a valid Terraform resource name, return it as is
+    if (cleanedType.startsWith('aws_')) {
+      logger.info(`Using Terraform resource type: ${cleanedType}`);
+      return cleanedType;
+    }
+
+    // Map common names to Terraform resource names
+    const mappedType = resourceTypeMap[cleanedType.toLowerCase()];
+    if (mappedType) {
+      logger.info(`Mapped resource type '${resourceType}' -> '${cleanedType}' -> '${mappedType}'`);
+      return mappedType;
+    }
+
+    // If no mapping found, assume it's already a Terraform resource name
+    logger.info(`Using resource type as-is: ${cleanedType}`);
+    return cleanedType;
+  }
+
+  /**
    * Import a resource into Terraform state
    * @param params { workspaceId, resourceType, resourceName, resourceId, cloudConnection }
    */
@@ -741,6 +850,14 @@ ec2_volume_size = 20
   }): Promise<TerraformExecutionResult & { logs: string[], stateFilePath?: string }> {
     const logs: string[] = [];
     try {
+      // Map resource type to correct Terraform resource name
+      const mappedResourceType = this.mapResourceType(resourceType);
+      logs.push(`Resource type: ${resourceType} -> ${mappedResourceType}`);
+
+      // Sanitize resource name for Terraform
+      const sanitizedResourceName = this.sanitizeResourceName(resourceName);
+      logs.push(`Resource name: ${resourceName} -> ${sanitizedResourceName}`);
+
       // Prepare workspace
       const workspacePath = path.join(this.terraformDir, workspaceId);
       const terraformDir = path.join(workspacePath, 'terraform');
@@ -754,49 +871,145 @@ ec2_volume_size = 20
       }
       // TODO: Add support for GCP/Azure
 
-      // Generate or update .tf file for the resource
-      const tfFile = path.join(terraformDir, `${resourceType}_${resourceName}.tf`);
-      if (!fs.existsSync(tfFile)) {
-        const tfBlock = `resource \"${resourceType}\" \"${resourceName}\" {\n  # Managed by DeployAI import\n}\n`;
-        fs.writeFileSync(tfFile, tfBlock);
-        logs.push(`Terraform resource block written to ${tfFile}`);
+      // Check if Terraform files exist
+      const mainTfFile = path.join(terraformDir, 'main.tf');
+      const terraformInitFile = path.join(terraformDir, '.terraform');
+      const stateFile = path.join(terraformDir, 'terraform.tfstate');
+      
+      let needsInit = false;
+      let mainTfContent: string;
+
+      if (!fs.existsSync(mainTfFile)) {
+        // Create a complete Terraform configuration with provider requirements
+        logs.push('No main.tf found - creating new Terraform configuration');
+        mainTfContent = `terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "${cloudConnection.region || 'us-east-1'}"
+}
+
+resource "${mappedResourceType}" "${sanitizedResourceName}" {
+  # Managed by DeployAI import
+  # Resource ID: ${resourceId}
+}
+`;
+        fs.writeFileSync(mainTfFile, mainTfContent);
+        logs.push(`Created new main.tf with resource ${mappedResourceType}.${sanitizedResourceName}`);
+        needsInit = true;
       } else {
-        logs.push(`Terraform resource block already exists at ${tfFile}`);
+        // Read existing content and check if the resource already exists
+        const existingContent = fs.readFileSync(mainTfFile, 'utf-8');
+        const resourcePattern = new RegExp(`resource\\s+"${mappedResourceType}"\\s+"${sanitizedResourceName}"\\s*{`);
+        
+        if (resourcePattern.test(existingContent)) {
+          logs.push(`Resource ${mappedResourceType}.${sanitizedResourceName} already exists in main.tf`);
+        } else {
+          // Append the new resource to the existing file
+          mainTfContent = existingContent + `
+
+resource "${mappedResourceType}" "${sanitizedResourceName}" {
+  # Managed by DeployAI import
+  # Resource ID: ${resourceId}
+}
+`;
+          fs.writeFileSync(mainTfFile, mainTfContent);
+          logs.push(`Added resource ${mappedResourceType}.${sanitizedResourceName} to existing main.tf`);
+        }
       }
 
-      // Run terraform init
-      logs.push('Running terraform init...');
-      const initResult = await execAsync('terraform init', { cwd: terraformDir });
-      logs.push(initResult.stdout);
+      // Check if Terraform needs initialization
+      if (!fs.existsSync(terraformInitFile) || needsInit) {
+        logs.push('Running terraform init...');
+        try {
+          const initResult = await execAsync('terraform init', { cwd: terraformDir });
+          logs.push('Terraform init successful');
+          logs.push(initResult.stdout);
+        } catch (initError: any) {
+          logs.push(`Terraform init failed: ${initError.message}`);
+          if (initError.stdout) logs.push(initError.stdout);
+          if (initError.stderr) logs.push(initError.stderr);
+          throw new Error(`Terraform initialization failed: ${initError.message}`);
+        }
+      } else {
+        logs.push('Terraform already initialized, skipping init');
+      }
 
-      // Run terraform import
-      const importCmd = `terraform import ${resourceType}.${resourceName} ${resourceId}`;
-      logs.push(`Running: ${importCmd}`);
-      const importResult = await execAsync(importCmd, { cwd: terraformDir });
-      logs.push(importResult.stdout);
+      // Check if resource is already in state
+      let resourceInState = false;
+      if (fs.existsSync(stateFile)) {
+        try {
+          const stateContent = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+          const resourceKey = `${mappedResourceType}.${sanitizedResourceName}`;
+          if (stateContent.resources && stateContent.resources.some((r: any) => r.name === sanitizedResourceName && r.type === mappedResourceType)) {
+            resourceInState = true;
+            logs.push(`Resource ${resourceKey} already exists in Terraform state`);
+          }
+        } catch (stateError) {
+          logs.push(`Error reading state file: ${stateError}`);
+        }
+      }
 
-      // Save the state file path
-      const stateFilePath = path.join(terraformDir, 'terraform.tfstate');
+      // Run terraform import if resource is not in state
+      if (!resourceInState) {
+        const importCmd = `terraform import ${mappedResourceType}.${sanitizedResourceName} ${resourceId}`;
+        logs.push(`Running: ${importCmd}`);
+        try {
+          const importResult = await execAsync(importCmd, { cwd: terraformDir });
+          logs.push('Terraform import successful');
+          logs.push(importResult.stdout);
+        } catch (importError: any) {
+          logs.push(`Terraform import failed: ${importError.message}`);
+          if (importError.stdout) logs.push(importError.stdout);
+          if (importError.stderr) logs.push(importError.stderr);
+          throw new Error(`Terraform import failed: ${importError.message}`);
+        }
+      }
+
+      // Verify the state file was created/updated
       let stateContent = null;
-      if (fs.existsSync(stateFilePath)) {
-        stateContent = fs.readFileSync(stateFilePath, 'utf-8');
-        logs.push(`Terraform state saved at ${stateFilePath}`);
+      if (fs.existsSync(stateFile)) {
+        stateContent = fs.readFileSync(stateFile, 'utf-8');
+        logs.push(`Terraform state saved at ${stateFile}`);
+        
+        // Verify the resource is in state
+        try {
+          const stateJson = JSON.parse(stateContent);
+          const resourceKey = `${mappedResourceType}.${sanitizedResourceName}`;
+          const resourceExists = stateJson.resources && stateJson.resources.some((r: any) => 
+            r.name === sanitizedResourceName && r.type === mappedResourceType
+          );
+          
+          if (resourceExists) {
+            logs.push(`✅ Resource ${resourceKey} successfully imported to Terraform state`);
+          } else {
+            logs.push(`⚠️ Resource ${resourceKey} not found in state file after import`);
+          }
+        } catch (parseError) {
+          logs.push(`⚠️ Could not parse state file to verify resource: ${parseError}`);
+        }
       } else {
-        logs.push('Terraform state file not found after import.');
+        logs.push('⚠️ Terraform state file not found after import');
       }
-
-      // Optionally, update the repository record with state file path (pseudo-code, implement as needed)
-      // await databaseService.updateRepository(workspaceId, { terraformStatePath: stateFilePath });
 
       return {
         success: true,
-        output: importResult.stdout,
+        output: `Resource ${mappedResourceType}.${sanitizedResourceName} imported successfully`,
         logs,
-        stateFilePath
+        stateFilePath: stateFile
       };
     } catch (error: any) {
       logger.error('Error importing Terraform resource', error);
-      logs.push(error.stdout || error.stderr || error.message);
+      logs.push(`❌ Error: ${error.message}`);
+      if (error.stdout) logs.push(error.stdout);
+      if (error.stderr) logs.push(error.stderr);
       return {
         success: false,
         error: error.message,

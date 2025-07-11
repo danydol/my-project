@@ -4,6 +4,12 @@ import passport from 'passport';
 import { logger } from '../utils/logger';
 import databaseService from '../services/databaseService';
 import { Response } from 'express';
+import simpleGit from 'simple-git';
+import glob from 'glob-promise';
+import path from 'path';
+import fs from 'fs';
+import { exec } from 'child_process';
+import util from 'util';
 
 const router = Router();
 
@@ -511,8 +517,8 @@ router.get('/repositories/:owner/:repo/contents', async (req: any, res) => {
     });
 
     const { data } = await octokit.rest.repos.getContent({
-      owner,
-      repo,
+      owner: owner,
+      repo: repo,
       path: path as string
     });
 
@@ -709,10 +715,11 @@ router.get('/workflows', async (req: any, res: Response) => {
           const jobsWithSteps = await Promise.all(
             jobs.jobs.map(async (job) => {
               try {
-                const { data: steps } = await octokit.rest.actions.listJobSteps({
+                const { data: steps } = await octokit.rest.actions.listJobsForWorkflowRunAttempt({
                   owner,
                   repo: repository,
-                  job_id: job.id
+                  run_id: run.id,
+                  attempt_number: 1
                 });
 
                 return {
@@ -722,7 +729,7 @@ router.get('/workflows', async (req: any, res: Response) => {
                   conclusion: job.conclusion,
                   started_at: job.started_at,
                   completed_at: job.completed_at,
-                  steps: steps.steps.map(step => ({
+                  steps: steps.jobs.flatMap(j => j.steps || []).map((step: any) => ({
                     name: step.name,
                     status: step.status,
                     conclusion: step.conclusion,
@@ -888,7 +895,7 @@ router.post('/workflows/trigger', async (req: any, res: Response) => {
     return res.json({
       success: true,
       message: 'Workflow triggered successfully',
-      workflow_run_id: workflowRun.id
+      workflow_run_id: (workflowRun as any)?.id || 'unknown'
     });
   } catch (error: any) {
     logger.error('Error triggering GitHub workflow:', error);
@@ -896,6 +903,44 @@ router.post('/workflows/trigger', async (req: any, res: Response) => {
       success: false,
       error: error.message || 'Failed to trigger workflow'
     });
+  }
+});
+
+// Update (pull or clone) the repository for Terraform visualization
+router.post('/repository/:repoId/update-clone', async (req: any, res) => {
+  try {
+    const user = req.user;
+    const { repoId } = req.params;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not authenticated' });
+    }
+    if (!user.githubAccessToken) {
+      return res.status(401).json({ success: false, error: 'GitHub access token not found. Please reconnect your GitHub account.' });
+    }
+    // Get repository details from database
+    const repository = await databaseService.getRepositoryById(repoId);
+    if (!repository) {
+      return res.status(404).json({ success: false, error: 'Repository not found' });
+    }
+    if (repository.userId !== user.id) {
+      return res.status(403).json({ success: false, error: 'Access denied to repository' });
+    }
+    const repoDir = `/app/cloned-repos/${repoId}`;
+    const git = simpleGit();
+    let action;
+    if (fs.existsSync(repoDir)) {
+      // Repo exists, pull latest
+      await git.cwd(repoDir).pull();
+      action = 'pulled';
+    } else {
+      // Repo does not exist, clone
+      await git.clone(repository.cloneUrl, repoDir);
+      action = 'cloned';
+    }
+    return res.json({ success: true, action });
+  } catch (error: any) {
+    logger.error('Error updating repo clone', { error: error.message });
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 

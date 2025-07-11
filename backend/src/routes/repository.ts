@@ -389,110 +389,6 @@ router.delete('/analysis/:analysisId',
 
 /**
  * @swagger
- * /api/repositories/{repoId}/import-cloud-object:
- *   post:
- *     summary: Import an object from a cloud connection into a repository
- *     tags: [Repositories]
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: repoId
- *         required: true
- *         schema:
- *           type: string
- *         description: Repository ID
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - cloudConnectionId
- *               - objectType
- *               - objectId
- *               - resourceType
- *               - resourceName
- *             properties:
- *               cloudConnectionId:
- *                 type: string
- *               objectType:
- *                 type: string
- *               objectId:
- *                 type: string
- *               resourceType:
- *                 type: string
- *               resourceName:
- *                 type: string
- *     responses:
- *       200:
- *         description: Object imported successfully
- *       400:
- *         description: Invalid request
- *       500:
- *         description: Server error
- */
-router.post('/:repoId/import-cloud-object',
-  requireAuth,
-  [
-    param('repoId').isString().notEmpty().withMessage('Repository ID is required'),
-    body('cloudConnectionId').isString().notEmpty().withMessage('Cloud Connection ID is required'),
-    body('objectType').isString().notEmpty().withMessage('Object type is required'),
-    body('objectId').isString().notEmpty().withMessage('Object ID is required'),
-    body('resourceType').isString().notEmpty().withMessage('Resource type is required'),
-    body('resourceName').isString().notEmpty().withMessage('Resource name is required')
-  ],
-  handleValidationErrors,
-  async (req: any, res: express.Response) => {
-    try {
-      const { repoId } = req.params;
-      const { cloudConnectionId, objectType, objectId, resourceType, resourceName } = req.body;
-      const userId = req.user.id;
-
-      // Fetch repository and cloud connection
-      const repository = await databaseService.getRepositoryById(repoId);
-      if (!repository) throw new Error('Repository not found');
-      const cloudConnection = await databaseService.getCloudConnection(cloudConnectionId);
-      if (!cloudConnection) throw new Error('Cloud connection not found');
-
-      // Use deploymentService to import the resource into Terraform state
-      const importResult = await deploymentService.importTerraformResource({
-        workspaceId: repoId,
-        resourceType,
-        resourceName,
-        resourceId: objectId,
-        cloudConnection
-      });
-
-      // Optionally, update the repository metadata as before
-      await databaseService.importCloudObjectToRepository({
-        repoId,
-        cloudConnectionId,
-        objectType,
-        objectId,
-        userId
-      });
-
-      res.json({
-        success: importResult.success,
-        result: importResult.output,
-        error: importResult.error || null,
-        logs: importResult.logs,
-        stateFilePath: importResult.stateFilePath
-      });
-    } catch (error) {
-      logger.error('Error importing cloud object to repository', { error, userId: req.user?.id });
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to import cloud object'
-      });
-    }
-  }
-);
-
-/**
- * @swagger
  * /api/repositories/imported-cloud-objects:
  *   get:
  *     summary: List all imported cloud objects across all repositories for the authenticated user
@@ -533,6 +429,113 @@ router.get('/imported-cloud-objects',
       res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : 'Failed to list imported cloud objects'
+      });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/repositories/{repoId}/import-cloud-object:
+ *   post:
+ *     summary: Import a cloud object into a repository using Terraform import
+ *     tags: [Repositories]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: repoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Repository ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - cloudConnectionId
+ *               - objectType
+ *               - objectId
+ *               - resourceType
+ *               - resourceName
+ *             properties:
+ *               cloudConnectionId:
+ *                 type: string
+ *                 description: ID of the cloud connection to use
+ *               objectType:
+ *                 type: string
+ *                 description: Type of cloud object (e.g., S3 Bucket, EC2 Instance)
+ *               objectId:
+ *                 type: string
+ *                 description: ID of the cloud object to import
+ *               resourceType:
+ *                 type: string
+ *                 description: Terraform resource type (e.g., aws_s3_bucket, aws_instance)
+ *               resourceName:
+ *                 type: string
+ *                 description: Name for the Terraform resource
+ *     responses:
+ *       200:
+ *         description: Cloud object imported successfully
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
+router.post(
+  '/:repoId/import-cloud-object',
+  requireAuth,
+  (req: express.Request, res: express.Response, next: express.NextFunction) => { req.setTimeout(300000); next(); }, // 5 minutes
+  [
+    param('repoId').isString().withMessage('Repository ID is required'),
+    body('cloudConnectionId').isString().withMessage('Cloud connection ID is required'),
+    body('objectType').isString().withMessage('Object type is required'),
+    body('objectId').isString().withMessage('Object ID is required'),
+    body('resourceType').isString().withMessage('Resource type is required'),
+    body('resourceName').isString().withMessage('Resource name is required')
+  ],
+  handleValidationErrors,
+  async (req: any, res: express.Response) => {
+    try {
+      const { repoId } = req.params;
+      const { cloudConnectionId, objectType, objectId, resourceType, resourceName } = req.body;
+
+      // Verify user has access to the repository
+      const repositories = await databaseService.getUserRepositories(req.user.id);
+      const repository = repositories.find(r => r.id === repoId);
+      
+      if (!repository) {
+        return res.status(404).json({
+          success: false,
+          error: 'Repository not found'
+        });
+      }
+
+      const result = await databaseService.importCloudObjectToRepository({
+        repoId,
+        cloudConnectionId,
+        objectType,
+        objectId,
+        userId: req.user.id,
+        resourceType,
+        resourceName
+      });
+
+      return res.json({
+        success: true,
+        message: 'Cloud object imported successfully',
+        logs: result.logs,
+        stateFilePath: result.stateFilePath,
+        terraformConfig: result.terraformConfig
+      });
+    } catch (error) {
+      logger.error('Error importing cloud object', { error, userId: req.user?.id });
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to import cloud object'
       });
     }
   }

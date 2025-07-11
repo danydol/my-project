@@ -434,4 +434,204 @@ router.post('/test-validation', async (req: any, res) => {
   }
 });
 
+// Update cloud connection credentials
+router.put('/connections/:connectionId/credentials', async (req: any, res) => {
+  try {
+    const { connectionId } = req.params;
+    const { config } = req.body;
+    const user = req.user;
+
+    if (!config) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: config'
+      });
+    }
+
+    const connection = await databaseService.getCloudConnection(connectionId);
+    if (!connection) {
+      return res.status(404).json({
+        success: false,
+        error: 'Cloud connection not found'
+      });
+    }
+
+    // Verify user has access to the project
+    const project = await databaseService.getProject(connection.projectId, user.id);
+    if (!project) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Validate new credentials based on provider
+    let validationResult;
+    switch (connection.provider) {
+      case 'aws':
+        validationResult = await validateAWSCredentials(config);
+        break;
+      case 'gcp':
+        validationResult = await validateGCPCredentials(config);
+        break;
+      case 'azure':
+        validationResult = await validateAzureCredentials(config);
+        break;
+      default:
+        return res.status(400).json({
+          success: false,
+          error: 'Unsupported provider'
+        });
+    }
+
+    if (!validationResult.valid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid credentials',
+        details: validationResult.error
+      });
+    }
+
+    // Encrypt credentials before storing
+    const encryptedConfig = await encryptCredentials(config);
+
+    // Update cloud connection with new credentials
+    const updateData = {
+      config: encryptedConfig,
+      status: 'connected',
+      lastValidated: new Date(),
+      errorMessage: null
+    };
+
+    await databaseService.updateCloudConnection(connectionId, updateData);
+
+    return res.json({
+      success: true,
+      message: 'Credentials updated successfully',
+      connection: {
+        ...connection,
+        status: 'connected',
+        lastValidated: updateData.lastValidated,
+        config: undefined // Don't return encrypted config
+      }
+    });
+  } catch (error: any) {
+    logger.error('Error updating cloud connection credentials', { error: error.message });
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to update credentials'
+    });
+  }
+});
+
+// Get EC2 instances for a cloud connection
+router.get('/connections/:connectionId/ec2-instances', async (req: any, res) => {
+  try {
+    const { connectionId } = req.params;
+    const user = req.user;
+
+    const connection = await databaseService.getCloudConnection(connectionId);
+    if (!connection) {
+      return res.status(404).json({
+        success: false,
+        error: 'Cloud connection not found'
+      });
+    }
+
+    // Verify user has access to the project
+    const project = await databaseService.getProject(connection.projectId, user.id);
+    if (!project) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Only support AWS for now
+    if (connection.provider !== 'aws') {
+      return res.status(400).json({
+        success: false,
+        error: 'EC2 instances are only available for AWS connections'
+      });
+    }
+
+    // Decrypt credentials
+    const decryptedConfig = await decryptCredentials(connection.config as string);
+
+    // Set up AWS credentials for the CLI command
+    const { exec } = require('child_process');
+    const util = require('util');
+    const execAsync = util.promisify(exec);
+
+    // Set environment variables for AWS CLI
+    const env: any = {
+      ...process.env,
+      AWS_ACCESS_KEY_ID: decryptedConfig.accessKeyId,
+      AWS_SECRET_ACCESS_KEY: decryptedConfig.secretAccessKey,
+      AWS_DEFAULT_REGION: connection.region || 'us-east-1',
+      AWS_CONFIG_FILE: '/dev/null', // Prevent AWS CLI from looking for config files
+      AWS_SHARED_CREDENTIALS_FILE: '/dev/null' // Prevent AWS CLI from looking for credentials files
+    };
+
+    if (decryptedConfig.sessionToken) {
+      env.AWS_SESSION_TOKEN = decryptedConfig.sessionToken;
+    }
+
+    // Execute AWS CLI command
+    const command = `aws ec2 describe-instances --filters "Name=instance-state-name,Values=running,stopped" --output json --no-cli-pager`;
+    const { stdout, stderr } = await execAsync(command, { env });
+
+    if (stderr) {
+      logger.error('AWS CLI stderr:', stderr);
+    }
+
+    const instances = JSON.parse(stdout);
+    
+    // Transform the response to a simpler format
+    const simplifiedInstances = instances.Reservations.flatMap((reservation: any) =>
+      reservation.Instances.map((instance: any) => ({
+        id: instance.InstanceId,
+        name: instance.Tags?.find((tag: any) => tag.Key === 'Name')?.Value || 'Unnamed',
+        state: instance.State.Name,
+        type: instance.InstanceType,
+        zone: instance.Placement.AvailabilityZone,
+        privateIp: instance.PrivateIpAddress,
+        publicIp: instance.PublicIpAddress,
+        launchTime: instance.LaunchTime,
+        platform: instance.Platform || 'linux',
+        vpcId: instance.VpcId,
+        subnetId: instance.SubnetId
+      }))
+    );
+
+    return res.json({
+      success: true,
+      instances: simplifiedInstances
+    });
+  } catch (error: any) {
+    logger.error('Error fetching EC2 instances', { error: error.message });
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch EC2 instances',
+      details: error.message
+    });
+  }
+});
+
+// Get all cloud connections for the authenticated user
+router.get('/connections', async (req: any, res) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+    // Get all cloud connections for all projects the user has access to
+    const connections = await databaseService.getAllCloudConnectionsForUser(user.id);
+    return res.json({ success: true, connections });
+  } catch (error: any) {
+    logger.error('Error fetching cloud connections', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to fetch cloud connections' });
+  }
+});
+
 export default router; 

@@ -4,6 +4,10 @@ import { body, param, validationResult } from 'express-validator';
 import { logger } from '../utils/logger';
 import deploymentService from '../services/deploymentService';
 import databaseService from '../services/databaseService';
+import path from 'path';
+import fs from 'fs';
+import { exec } from 'child_process';
+import util from 'util';
 
 const router = Router();
 
@@ -450,12 +454,13 @@ router.get('/:id/progress', async (req: any, res: Response) => {
 
     // Get repository and cloud connection details
     const repository = await databaseService.getRepositoryById(deployment.repositoryId);
-    const cloudConnection = await databaseService.getCloudConnectionById(deployment.cloudConnectionId);
+    const cloudConnection = deployment.cloudConnectionId ? 
+      await databaseService.getCloudConnectionById(deployment.cloudConnectionId) : null;
 
-    if (!repository || !cloudConnection) {
+    if (!repository) {
       return res.status(404).json({
         success: false,
-        error: 'Repository or cloud connection not found'
+        error: 'Repository not found'
       });
     }
 
@@ -525,13 +530,14 @@ router.get('/:id/progress', async (req: any, res: Response) => {
         name: 'Deploy Application',
         status: deployment.status === 'deployed' ? 'completed' : 'pending',
         startTime: deployment.status === 'deployed' ? deployment.deployedAt : undefined,
-        endTime: deployment.status === 'deployed' ? new Date(new Date(deployment.deployedAt!).getTime() + 120 * 1000).toISOString() : undefined,
+        endTime: deployment.status === 'deployed' && deployment.deployedAt ? new Date(new Date(deployment.deployedAt).getTime() + 120 * 1000).toISOString() : undefined,
         duration: deployment.status === 'deployed' ? 120 : undefined
       }
     ];
 
     // Generate GitHub Actions URL
-    const githubActionsUrl = `https://github.com/${repository.owner}/${repository.name}/actions`;
+    const [owner, repoName] = repository.fullName.split('/');
+    const githubActionsUrl = `https://github.com/${owner}/${repoName}/actions`;
 
     // Mock Terraform logs (in real implementation, this would come from actual Terraform execution)
     const terraformLogs = deployment.status === 'deploying' || deployment.status === 'deployed' ? [
@@ -551,14 +557,14 @@ router.get('/:id/progress', async (req: any, res: Response) => {
       environment: deployment.environment,
       repository: {
         name: repository.name,
-        owner: repository.owner,
+        owner: owner,
         branch: 'main', // This should come from the actual deployment
         commitSha: 'abc12345' // This should come from the actual deployment
       },
       cloudConnection: {
-        name: cloudConnection.name,
-        provider: cloudConnection.provider,
-        region: cloudConnection.region
+        name: cloudConnection?.name,
+        provider: cloudConnection?.provider,
+        region: cloudConnection?.region
       },
       steps,
       currentStep,

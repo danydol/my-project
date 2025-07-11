@@ -3,7 +3,7 @@
 FROM node:18-alpine AS dependencies
 
 # Install build dependencies
-RUN apk add --no-cache openssl python3 make g++
+RUN apk add --no-cache openssl python3 make g++ git
 
 # Set working directory
 WORKDIR /app
@@ -11,6 +11,7 @@ WORKDIR /app
 # Copy package files first (for better caching)
 COPY backend/package*.json ./
 COPY backend/prisma ./prisma/
+COPY backend/types ./types
 
 # Install dependencies
 RUN npm ci --include=dev
@@ -46,8 +47,20 @@ RUN npm run build
 # Stage 4: Production stage
 FROM node:18-alpine AS production
 
-# Install runtime dependencies
-RUN apk add --no-cache openssl curl
+# Install runtime dependencies including Terraform and AWS CLI
+RUN apk add --no-cache openssl curl unzip python3 py3-pip git && \
+    # Install Terraform
+    wget -O terraform.zip https://releases.hashicorp.com/terraform/1.5.7/terraform_1.5.7_linux_amd64.zip && \
+    unzip terraform.zip -d /usr/local/bin && \
+    rm terraform.zip && \
+    chmod +x /usr/local/bin/terraform && \
+    # Install AWS CLI using pip with --break-system-packages flag
+    pip3 install --no-cache-dir --break-system-packages awscli && \
+    # Verify installations
+    terraform --version && \
+    aws --version && \
+    wget -O /usr/local/bin/wait-for-it.sh https://raw.githubusercontent.com/vishnubob/wait-for-it/master/wait-for-it.sh && \
+    chmod +x /usr/local/bin/wait-for-it.sh
 
 # Set working directory
 WORKDIR /app
@@ -68,11 +81,14 @@ COPY --from=frontend-builder --chown=deployai:nodejs /frontend/build ./frontend/
 # Copy health check script
 COPY --chown=deployai:nodejs backend/healthcheck.js ./
 
+# Copy Terraform files
+COPY --chown=deployai:nodejs backend/terraform-workspaces ./terraform-workspaces/
+
 # Create logs directory with proper permissions
 RUN mkdir -p logs && chown deployai:nodejs logs
 
-# Create terraform-workspaces directory with write permissions
-RUN mkdir -p /app/terraform-workspaces && chmod 777 /app/terraform-workspaces
+# Create cloned-repos directory with write permissions
+RUN mkdir -p /app/cloned-repos && chmod 777 /app/cloned-repos
 
 # Switch to non-root user
 USER deployai
