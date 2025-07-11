@@ -223,4 +223,60 @@
   .action-buttons button {
     width: 100%;
   }
+}
+
+@media (max-width: 640px) {
+  .connect-cloud-modal {
+    width: 95%;
+    margin: 20px;
+  }
+  
+  .modal-header {
+    padding: 20px 20px 0 20px;
+  }
+  
+  .modal-content {
+    padding: 20px;
+  }
+  
+  .provider-info {
+    gap: 12px;
+  }
+  
+  .provider-icon {
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+  }
+  
+  .provider-info h2 {
+    font-size: 18px;
+  }
+  
+  .modal-actions {
+    flex-direction: column;
+  }
+  
+  .modal-actions button {
+    width: 100%;
+  }
+}
+
+/* Credentials warning styles */
+.credentials-warning {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background-color: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #92400e;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.credentials-warning::before {
+  content: "⚠️";
+  font-size: 14px;
 } 

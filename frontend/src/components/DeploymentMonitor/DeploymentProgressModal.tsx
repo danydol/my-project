@@ -68,7 +68,10 @@ const DeploymentProgressModal: React.FC<DeploymentProgressModalProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
-  const [activeTab, setActiveTab] = useState<'progress' | 'logs' | 'github'>('progress');
+  const [deployingToCloud, setDeployingToCloud] = useState(false);
+  const [deployLogs, setDeployLogs] = useState<string[]>([]);
+  const [deployError, setDeployError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'progress' | 'logs' | 'deploy' | 'github'>('progress');
 
   useEffect(() => {
     if (!isOpen || !deploymentId) return;
@@ -162,6 +165,32 @@ const DeploymentProgressModal: React.FC<DeploymentProgressModalProps> = ({
     }
   };
 
+  const handleDeployToCloud = async () => {
+    if (!deploymentId) return;
+    setDeployingToCloud(true);
+    setDeployLogs([]);
+    setDeployError(null);
+    try {
+      const response = await fetch(`/api/deployments/${deploymentId}/terraform-apply`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await response.json();
+      if (data.output) {
+        setDeployLogs(data.output.split('\n'));
+      } else if (data.error) {
+        setDeployError(data.error);
+      }
+    } catch (err: any) {
+      setDeployError(err.message);
+    } finally {
+      setDeployingToCloud(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -229,6 +258,16 @@ const DeploymentProgressModal: React.FC<DeploymentProgressModalProps> = ({
               }`}
             >
               Logs
+            </button>
+            <button
+              onClick={() => setActiveTab('deploy')}
+              className={`py-3 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'deploy'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Deploy to Cloud
             </button>
             <button
               onClick={() => setActiveTab('github')}
@@ -356,6 +395,23 @@ const DeploymentProgressModal: React.FC<DeploymentProgressModalProps> = ({
                         </div>
                       )) || 'No logs available yet...'}
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'deploy' && (
+                <div className="p-4">
+                  <button
+                    onClick={handleDeployToCloud}
+                    disabled={deployingToCloud}
+                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {deployingToCloud ? 'Deploying...' : 'Deploy to Cloud'}
+                  </button>
+                  <div className="mt-4 bg-gray-900 text-green-400 p-4 rounded font-mono text-sm max-h-64 overflow-auto">
+                    {deployLogs.length > 0 && deployLogs.map((line, idx) => <div key={idx}>{line}</div>)}
+                    {deployError && <div className="text-red-400">{deployError}</div>}
+                    {deployLogs.length === 0 && !deployError && !deployingToCloud && <div>No deployment output yet.</div>}
                   </div>
                 </div>
               )}

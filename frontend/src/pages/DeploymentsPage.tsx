@@ -14,12 +14,34 @@ import {
   RefreshCw,
   Eye,
   Zap,
-  X
+  X,
+  FolderOpen
 } from 'lucide-react';
 import apiClient from '../services/api';
 import DeploymentProgressModal from '../components/DeploymentMonitor/DeploymentProgressModal';
 import GitHubActionsStatus from '../components/DeploymentMonitor/GitHubActionsStatus';
 import DeploymentTriggerModal from '../components/DeploymentMonitor/DeploymentTriggerModal';
+import { repositoryService } from '../services/repositoryService';
+
+interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  slug: string;
+  status: string;
+  multiCloud: boolean;
+  tags: string[];
+  icon?: string;
+  color?: string;
+  cloudConnections: any[];
+  _count: {
+    repositories: number;
+    deployments: number;
+    cloudConnections: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface Repository {
   id: string;
@@ -29,6 +51,8 @@ interface Repository {
   language: string;
   private: boolean;
   githubId: string;
+  fullName: string;
+  projectId?: string;
 }
 
 interface CloudConnection {
@@ -37,6 +61,9 @@ interface CloudConnection {
   provider: string;
   region: string;
   status: string;
+  projectId: string;
+  description?: string;
+  isDefault: boolean;
 }
 
 interface Deployment {
@@ -55,6 +82,8 @@ interface Deployment {
 
 const DeploymentsPage: React.FC = () => {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [cloudConnections, setCloudConnections] = useState<CloudConnection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,15 +100,33 @@ const DeploymentsPage: React.FC = () => {
   const [showGitHubStatus, setShowGitHubStatus] = useState(false);
   const [showTriggerModal, setShowTriggerModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showApplyModal, setShowApplyModal] = useState(false);
+  const [applyOutput, setApplyOutput] = useState<string | null>(null);
+  const [applyingDeploymentId, setApplyingDeploymentId] = useState<string | null>(null);
+  const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null);
+  const [deployToCloud, setDeployToCloud] = useState(false);
+  const [workflowOutput, setWorkflowOutput] = useState<string | null>(null);
+  const [modalSelectedProject, setModalSelectedProject] = useState<Project | null>(null);
 
   useEffect(() => {
     loadDeployments();
-    loadAvailableResources();
-    
-    // Auto-refresh deployments every 30 seconds
-    const interval = setInterval(loadDeployments, 30000);
-    return () => clearInterval(interval);
+    loadProjects();
   }, []);
+
+  useEffect(() => {
+    if (selectedProject) {
+      loadProjectResources(selectedProject.id);
+    }
+  }, [selectedProject]);
+
+  useEffect(() => {
+    if (projects.length === 1) {
+      setSelectedProject(projects[0]);
+      setModalSelectedProject(projects[0]);
+      loadProjectResources(projects[0].id);
+    }
+  }, [projects]);
 
   const loadDeployments = async () => {
     try {
@@ -90,19 +137,59 @@ const DeploymentsPage: React.FC = () => {
     }
   };
 
-  const loadAvailableResources = async () => {
+  const loadProjects = async () => {
     try {
-      const response = await apiClient.get('/deployments/available-resources');
-      setRepositories(response.data.repositories);
-      setCloudConnections(response.data.cloudConnections);
-    } catch (error) {
-      console.error('Error loading resources:', error);
+      setLoading(true);
+      const response = await apiClient.get('/projects');
+      setProjects(response.data.projects || []);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to fetch projects');
     } finally {
       setLoading(false);
     }
   };
 
+  const loadProjectResources = async (projectId: string) => {
+    try {
+      // Load repositories for the selected project
+      const reposResponse = await apiClient.get(`/projects/${projectId}/repositories`);
+      setRepositories(reposResponse.data.repositories || []);
+
+      // Load cloud connections for the selected project
+      const connectionsResponse = await apiClient.get(`/projects/${projectId}/cloud-connections`);
+      setCloudConnections(connectionsResponse.data.connections || []);
+    } catch (error) {
+      console.error('Error loading project resources:', error);
+    }
+  };
+
+  const handleProjectSelect = (project: Project) => {
+    setSelectedProject(project);
+    setSelectedRepo('');
+    setSelectedCloud('');
+    setRegion('');
+  };
+
+  const handleModalProjectSelect = (projectId: string) => {
+    const project = projects.find(p => p.id === projectId) || null;
+    setModalSelectedProject(project);
+    setSelectedProject(project);
+    setSelectedRepo('');
+    setSelectedCloud('');
+    setRegion('');
+    if (project) {
+      loadProjectResources(project.id);
+    } else {
+      setRepositories([]);
+      setCloudConnections([]);
+    }
+  };
+
   const createDeployment = async () => {
+    if (!selectedProject) {
+      alert('Please select a project first');
+      return;
+    }
     if (!selectedRepo || !selectedCloud || !environment || !region) {
       alert('Please fill in all required fields');
       return;
@@ -111,6 +198,7 @@ const DeploymentsPage: React.FC = () => {
     setCreating(true);
     try {
       const response = await apiClient.post('/deployments', {
+        projectId: selectedProject.id,
         repositoryId: selectedRepo,
         cloudConnectionId: selectedCloud,
         environment,
@@ -223,14 +311,51 @@ const DeploymentsPage: React.FC = () => {
     }
   };
 
+  const handleTerraformApply = async (deploymentId: string) => {
+    setApplyingDeploymentId(deploymentId);
+    setShowApplyModal(true);
+    setApplyOutput(null);
+
+    try {
+      const response = await apiClient.post(`/deployments/${deploymentId}/terraform-apply`);
+      setApplyOutput(response.data.output || 'Terraform apply completed successfully');
+    } catch (error: any) {
+      setApplyOutput(`Error: ${error.response?.data?.error || error.message}`);
+    } finally {
+      setApplyingDeploymentId(null);
+    }
+  };
+
+  const handleOpenWorkflowModal = (deployment: any) => {
+    setSelectedRepoId(deployment.repository.id);
+    setDeployToCloud(true);
+    setShowWorkflowModal(true);
+    setWorkflowOutput(null);
+  };
+
+  const handleTriggerWorkflow = async () => {
+    if (!selectedRepoId) return;
+
+    setWorkflowOutput('Triggering workflow...');
+    try {
+      const response = await apiClient.post(`/github/repository/${selectedRepoId}/trigger-workflow`, {
+        workflow: 'deploy.yml',
+        ref: 'main'
+      });
+      setWorkflowOutput(`Workflow triggered successfully! Run ID: ${response.data.runId}`);
+    } catch (error: any) {
+      setWorkflowOutput(`Error: ${error.response?.data?.error || error.message}`);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-6">
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
-          <div className="space-y-4">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="h-24 bg-gray-200 rounded"></div>
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-gray-300 rounded w-1/4"></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-48 bg-gray-300 rounded"></div>
             ))}
           </div>
         </div>
@@ -239,351 +364,327 @@ const DeploymentsPage: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-6">
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Deployments</h1>
-          <p className="text-gray-600 mt-2">Manage your application deployments and infrastructure</p>
+          <h1 className="text-2xl font-bold text-gray-900">Deployments</h1>
+          <p className="text-gray-600">Manage your application deployments</p>
         </div>
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={() => setShowTriggerModal(true)}
-            className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
-          >
-            <Zap className="w-4 h-4 mr-2" />
-            Trigger Workflow
-          </button>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            New Deployment
-          </button>
-        </div>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+        >
+          <Plus className="w-4 h-4 mr-2" />
+          New Deployment
+        </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white p-4 rounded-lg border">
-          <div className="flex items-center">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <Play className="w-5 h-5 text-blue-600" />
-            </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-gray-600">Total Deployments</p>
-              <p className="text-lg font-semibold text-gray-900">{deployments.length}</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-lg border">
-          <div className="flex items-center">
-            <div className="p-2 bg-green-100 rounded-lg">
-              <CheckCircle className="w-5 h-5 text-green-600" />
-            </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-gray-600">Active</p>
-              <p className="text-lg font-semibold text-gray-900">
-                {deployments.filter(d => d.status === 'deployed').length}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-lg border">
-          <div className="flex items-center">
-            <div className="p-2 bg-yellow-100 rounded-lg">
-              <Clock className="w-5 h-5 text-yellow-600" />
-            </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-gray-600">In Progress</p>
-              <p className="text-lg font-semibold text-gray-900">
-                {deployments.filter(d => d.status === 'deploying' || d.status === 'pending').length}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-lg border">
-          <div className="flex items-center">
-            <div className="p-2 bg-red-100 rounded-lg">
-              <XCircle className="w-5 h-5 text-red-600" />
-            </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-gray-600">Failed</p>
-              <p className="text-lg font-semibold text-gray-900">
-                {deployments.filter(d => d.status === 'failed').length}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Deployments List */}
-      <div className="bg-white rounded-lg border">
-        <div className="px-6 py-4 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">Recent Deployments</h2>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {deployments.length === 0 ? (
-            <div className="px-6 py-12 text-center">
-              <Cloud className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No deployments yet</h3>
-              <p className="text-gray-600 mb-4">Create your first deployment to get started</p>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
-              >
-                Create Deployment
-              </button>
-            </div>
-          ) : (
-            deployments.map((deployment) => (
-              <div key={deployment.id} className="px-6 py-4 hover:bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    {getStatusIcon(deployment.status)}
-                    <div>
-                      <h3 className="text-lg font-medium text-gray-900">{deployment.name}</h3>
-                      <div className="flex items-center space-x-2 mt-1">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(deployment.status)}`}>
-                          {deployment.status}
-                        </span>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getEnvironmentColor(deployment.environment)}`}>
-                          {deployment.environment}
-                        </span>
-                        <span className="text-sm text-gray-500">
-                          {deployment.provider.toUpperCase()}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    {/* View Progress Button */}
-                    <button
-                      onClick={() => viewDeploymentProgress(deployment)}
-                      className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
-                      title="View deployment progress"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                    
-                    {/* Trigger Workflow Button */}
-                    <button
-                      onClick={() => triggerWorkflow(deployment)}
-                      className="p-2 text-gray-400 hover:text-green-600 transition-colors"
-                      title="Trigger GitHub Actions workflow"
-                    >
-                      <Zap className="w-4 h-4" />
-                    </button>
-                    
-                    {/* GitHub Actions Button */}
-                    {deployment.githubActionsUrl && (
-                      <button
-                        onClick={() => viewGitHubStatus(deployment)}
-                        className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-                        title="View GitHub Actions"
-                      >
-                        <GitBranch className="w-4 h-4" />
-                      </button>
-                    )}
-                    
-                    {/* External Link */}
-                    {deployment.deploymentUrl && deployment.status === 'deployed' && (
-                      <a
-                        href={deployment.deploymentUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
-                    )}
-                    
-                    {/* Destroy Button */}
-                    {deployment.status === 'deployed' && (
-                      <button
-                        onClick={() => destroyDeployment(deployment.id)}
-                        className="p-2 text-gray-400 hover:text-red-600 transition-colors"
-                        title="Destroy deployment"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="mt-3 flex items-center space-x-4 text-sm text-gray-500">
-                  <div className="flex items-center">
-                    <GitBranch className="w-4 h-4 mr-1" />
-                    {deployment.repository.owner}/{deployment.repository.name}
-                  </div>
-                  <div className="flex items-center">
-                    <Cloud className="w-4 h-4 mr-1" />
-                    {deployment.cloudConnection.name} ({deployment.cloudConnection.region})
-                  </div>
+      {/* Project Selection */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Select Project
+        </label>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {projects.map((project) => (
+            <div
+              key={project.id}
+              onClick={() => handleProjectSelect(project)}
+              className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                selectedProject?.id === project.id
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-gray-300 hover:border-gray-400'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <FolderOpen className="w-5 h-5 text-gray-500 mr-2" />
                   <div>
-                    Created {new Date(deployment.createdAt).toLocaleDateString()}
+                    <h3 className="font-medium text-gray-900">{project.name}</h3>
+                    <p className="text-sm text-gray-500">
+                      {project._count.repositories} repos • {project._count.cloudConnections} cloud connections
+                    </p>
                   </div>
                 </div>
+                {selectedProject?.id === project.id && (
+                  <CheckCircle className="w-5 h-5 text-blue-500" />
+                )}
               </div>
-            ))
-          )}
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Create Deployment Modal */}
+      {/* Deployment Creation Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
-            <h2 className="text-xl font-semibold mb-4">Create New Deployment</h2>
-            
-            <div className="space-y-4">
-              {/* Repository Selection */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Repository *
-                </label>
-                <select
-                  value={selectedRepo}
-                  onChange={(e) => setSelectedRepo(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Select a repository</option>
-                  {repositories.map((repo) => (
-                    <option key={repo.id} value={repo.id}>
-                      {repo.owner}/{repo.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Create New Deployment</h3>
+              
+              {!selectedProject ? (
+                <div className="text-center py-4">
+                  <p className="text-gray-500">Please select a project first</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Project *
+                    </label>
+                    <select
+                      value={modalSelectedProject?.id || ''}
+                      onChange={e => handleModalProjectSelect(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                      required
+                    >
+                      <option value="">Select a project</option>
+                      {projects.map(project => (
+                        <option key={project.id} value={project.id}>{project.name}</option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* Cloud Connection Selection */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  AWS Connection *
-                </label>
-                <select
-                  value={selectedCloud}
-                  onChange={(e) => setSelectedCloud(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Select an AWS connection</option>
-                  {cloudConnections.map((conn) => (
-                    <option key={conn.id} value={conn.id}>
-                      {conn.name} ({conn.region})
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Repository *
+                    </label>
+                    <select
+                      value={selectedRepo}
+                      onChange={e => setSelectedRepo(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                      required
+                      disabled={!modalSelectedProject}
+                    >
+                      <option value="">Select a repository</option>
+                      {repositories.map((repo) => (
+                        <option key={repo.id} value={repo.id}>
+                          {repo.name} ({repo.language})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* Environment Selection */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Environment *
-                </label>
-                <select
-                  value={environment}
-                  onChange={(e) => setEnvironment(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="dev">Development</option>
-                  <option value="staging">Staging</option>
-                  <option value="production">Production</option>
-                </select>
-              </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Cloud Connection *
+                    </label>
+                    <select
+                      value={selectedCloud}
+                      onChange={e => setSelectedCloud(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                      required
+                      disabled={!modalSelectedProject}
+                    >
+                      <option value="">Select a cloud connection</option>
+                      {cloudConnections.map((connection) => (
+                        <option key={connection.id} value={connection.id}>
+                          {connection.name} ({connection.provider} - {connection.region})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* Region Selection */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Region *
-                </label>
-                <select
-                  value={region}
-                  onChange={(e) => setRegion(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Select a region</option>
-                  <option value="il-central-1">Israel Central (il-central-1)</option>
-                  <option value="us-east-1">US East (N. Virginia)</option>
-                  <option value="us-west-2">US West (Oregon)</option>
-                  <option value="eu-west-1">Europe (Ireland)</option>
-                  <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
-                </select>
-              </div>
-            </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Environment *
+                    </label>
+                    <select
+                      value={environment}
+                      onChange={e => setEnvironment(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                      required
+                    >
+                      <option value="dev">Development</option>
+                      <option value="staging">Staging</option>
+                      <option value="production">Production</option>
+                    </select>
+                  </div>
 
-            <div className="flex justify-end space-x-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowCreateModal(false);
-                  resetForm();
-                }}
-                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                disabled={creating}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={createDeployment}
-                disabled={creating || !selectedRepo || !selectedCloud || !environment || !region}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {creating ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Creating...
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4" />
-                    Create Deployment
-                  </>
-                )}
-              </button>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Region *
+                    </label>
+                    <input
+                      type="text"
+                      value={region}
+                      onChange={e => setRegion(e.target.value)}
+                      placeholder="e.g., us-east-1"
+                      className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                      required
+                    />
+                  </div>
+
+                  <div className="flex justify-end space-x-3 pt-4">
+                    <button
+                      onClick={() => setShowCreateModal(false)}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={createDeployment}
+                      disabled={creating || !modalSelectedProject || !selectedRepo || !selectedCloud || !region}
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {creating ? 'Creating...' : 'Create Deployment'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Deployment Progress Modal */}
-      {showProgressModal && selectedDeployment && (
+      {/* Deployments List */}
+      <div className="bg-white shadow overflow-hidden sm:rounded-md">
+        <ul className="divide-y divide-gray-200">
+          {deployments.map((deployment) => (
+            <li key={deployment.id} className="px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    {getStatusIcon(deployment.status)}
+                  </div>
+                  <div className="ml-4">
+                    <div className="flex items-center">
+                      <p className="text-sm font-medium text-gray-900">
+                        {deployment.name || `${deployment.repository.name} - ${deployment.environment}`}
+                      </p>
+                      <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(deployment.status)}`}>
+                        {deployment.status}
+                      </span>
+                      <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getEnvironmentColor(deployment.environment)}`}>
+                        {deployment.environment}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center text-sm text-gray-500">
+                      <GitBranch className="w-4 h-4 mr-1" />
+                      {deployment.repository.name}
+                      <Cloud className="w-4 h-4 ml-3 mr-1" />
+                      {deployment.cloudConnection.name} ({deployment.cloudConnection.provider})
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => viewDeploymentProgress(deployment)}
+                    className="inline-flex items-center px-3 py-1 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    <Eye className="w-4 h-4 mr-1" />
+                    View
+                  </button>
+                  {deployment.status === 'deployed' && (
+                    <button
+                      onClick={() => handleTerraformApply(deployment.id)}
+                      className="inline-flex items-center px-3 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                    >
+                      <Zap className="w-4 h-4 mr-1" />
+                      Apply
+                    </button>
+                  )}
+                  {deployment.status !== 'destroyed' && (
+                    <button
+                      onClick={() => destroyDeployment(deployment.id)}
+                      className="inline-flex items-center px-3 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" />
+                      Destroy
+                    </button>
+                  )}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Modals */}
+      {selectedDeployment && showProgressModal && (
         <DeploymentProgressModal
+          deploymentId={selectedDeployment.id}
           isOpen={showProgressModal}
           onClose={() => setShowProgressModal(false)}
+        />
+      )}
+
+      {selectedDeployment && showGitHubStatus && (
+        <GitHubActionsStatus
+          repository={`${selectedDeployment.repository.owner}/${selectedDeployment.repository.name}`}
           deploymentId={selectedDeployment.id}
         />
       )}
 
-      {/* GitHub Actions Status Modal */}
-      {showGitHubStatus && selectedDeployment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] overflow-hidden">
-            <div className="flex items-center justify-between p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">GitHub Actions Status</h2>
+      {selectedDeployment && showTriggerModal && (
+        <DeploymentTriggerModal
+          repository={`${selectedDeployment.repository.owner}/${selectedDeployment.repository.name}`}
+          isOpen={showTriggerModal}
+          onClose={() => setShowTriggerModal(false)}
+          onWorkflowTriggered={handleWorkflowTriggered}
+        />
+      )}
+
+      {/* Terraform Apply Modal */}
+      {showApplyModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-3/4 max-w-4xl shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Terraform Apply Output</h3>
               <button
-                onClick={() => setShowGitHubStatus(false)}
-                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                onClick={() => setShowApplyModal(false)}
+                className="text-gray-400 hover:text-gray-600"
               >
-                <X className="w-4 h-4" />
+                <X className="w-6 h-6" />
               </button>
             </div>
-            <div className="p-6 overflow-y-auto max-h-[70vh]">
-              <GitHubActionsStatus
-                repository={`${selectedDeployment.repository.owner}/${selectedDeployment.repository.name}`}
-                deploymentId={selectedDeployment.id}
-              />
+            <div className="bg-gray-900 text-green-400 p-4 rounded-md font-mono text-sm overflow-auto max-h-96">
+              {applyingDeploymentId ? (
+                <div className="flex items-center">
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Running terraform apply...
+                </div>
+              ) : (
+                <pre>{applyOutput || 'No output available'}</pre>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Deployment Trigger Modal */}
-      {showTriggerModal && (
-        <DeploymentTriggerModal
-          isOpen={showTriggerModal}
-          onClose={() => setShowTriggerModal(false)}
-          repository={selectedDeployment ? `${selectedDeployment.repository.owner}/${selectedDeployment.repository.name}` : ''}
-          onWorkflowTriggered={handleWorkflowTriggered}
-        />
+      {/* Workflow Modal */}
+      {showWorkflowModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-3/4 max-w-4xl shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Trigger GitHub Workflow</h3>
+              <button
+                onClick={() => setShowWorkflowModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div className="bg-gray-900 text-green-400 p-4 rounded-md font-mono text-sm overflow-auto max-h-96">
+                <pre>{workflowOutput || 'Ready to trigger workflow...'}</pre>
+              </div>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowWorkflowModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={handleTriggerWorkflow}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700"
+                >
+                  Trigger Workflow
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

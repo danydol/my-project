@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import './CloudConnectionGrid.css';
+import EC2InstancesModal from './EC2InstancesModal';
 
 interface CloudConnection {
   id: string;
@@ -29,6 +30,8 @@ const CloudConnectionGrid: React.FC<CloudConnectionGridProps> = ({
   onTest
 }) => {
   const [testingConnections, setTestingConnections] = useState<Set<string>>(new Set());
+  const [showEC2Modal, setShowEC2Modal] = useState(false);
+  const [selectedConnection, setSelectedConnection] = useState<CloudConnection | null>(null);
 
   const providers = [
     {
@@ -92,6 +95,16 @@ const CloudConnectionGrid: React.FC<CloudConnectionGridProps> = ({
     }
   };
 
+  const handleViewEC2Instances = (connection: CloudConnection) => {
+    setSelectedConnection(connection);
+    setShowEC2Modal(true);
+  };
+
+  const handleCloseEC2Modal = () => {
+    setShowEC2Modal(false);
+    setSelectedConnection(null);
+  };
+
   const formatLastValidated = (dateString?: string) => {
     if (!dateString) return 'Never';
     const date = new Date(dateString);
@@ -106,137 +119,157 @@ const CloudConnectionGrid: React.FC<CloudConnectionGridProps> = ({
   };
 
   return (
-    <div className="cloud-connection-grid">
-      <div className="grid-header">
-        <h2>Cloud Connections</h2>
-        <p>Connect your project to cloud providers for seamless deployments</p>
-      </div>
+    <>
+      <div className="cloud-connection-grid">
+        <div className="grid-header">
+          <h2>Cloud Connections</h2>
+          <p>Connect your project to cloud providers for seamless deployments</p>
+        </div>
 
-      <div className="provider-grid">
-        {providers.map(provider => {
-          const providerConnections = getProviderConnections(provider.id);
-          const status = getConnectionStatus(providerConnections);
-          const statusColor = getStatusColor(status);
+        <div className="provider-grid">
+          {providers.map(provider => {
+            const providerConnections = getProviderConnections(provider.id);
+            const status = getConnectionStatus(providerConnections);
+            const statusColor = getStatusColor(status);
 
-          return (
-            <div 
-              key={provider.id} 
-              className={`provider-card ${status}`}
-              style={{ borderColor: statusColor }}
-            >
-              <div className="provider-header">
-                <div className="provider-info">
-                  <div 
-                    className="provider-icon"
-                    style={{ backgroundColor: provider.color }}
-                  >
-                    {provider.icon}
-                  </div>
-                  <div>
-                    <h3>{provider.name}</h3>
-                    <p className="provider-description">{provider.description}</p>
-                  </div>
-                </div>
-                <div className="status-indicator">
-                  <div 
-                    className={`status-dot ${status}`}
-                    style={{ backgroundColor: statusColor }}
-                  ></div>
-                  <span className="status-text">
-                    {status === 'not-connected' && 'Not Connected'}
-                    {status === 'connected' && `Connected (${providerConnections.length})`}
-                    {status === 'partial' && `Partial (${providerConnections.filter(c => c.status === 'connected').length}/${providerConnections.length})`}
-                    {status === 'error' && 'Connection Error'}
-                    {status === 'pending' && 'Connecting...'}
-                  </span>
-                </div>
-              </div>
-
-              {providerConnections.length === 0 ? (
-                <div className="no-connections">
-                  <p>No connections configured</p>
-                  <button 
-                    className="connect-button"
-                    onClick={() => onConnect(provider.id)}
-                  >
-                    Connect to {provider.name}
-                  </button>
-                </div>
-              ) : (
-                <div className="connections-list">
-                  {providerConnections.map(connection => (
-                    <div key={connection.id} className={`connection-item ${connection.status}`}>
-                      <div className="connection-info">
-                        <div className="connection-header">
-                          <h4>{connection.name}</h4>
-                          {connection.isDefault && (
-                            <span className="default-badge">Default</span>
-                          )}
-                          <div 
-                            className={`connection-status ${connection.status}`}
-                            style={{ backgroundColor: getStatusColor(connection.status) }}
-                          >
-                            {connection.status}
-                          </div>
-                        </div>
-                        
-                        {connection.description && (
-                          <p className="connection-description">{connection.description}</p>
-                        )}
-                        
-                        <div className="connection-meta">
-                          {connection.region && (
-                            <span className="meta-item">📍 {connection.region}</span>
-                          )}
-                          <span className="meta-item">
-                            🕒 {formatLastValidated(connection.lastValidated)}
-                          </span>
-                        </div>
-
-                        {connection.errorMessage && (
-                          <div className="error-message">
-                            ⚠️ {connection.errorMessage}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="connection-actions">
-                        <button 
-                          className="action-button test"
-                          onClick={() => handleTestConnection(connection)}
-                          disabled={testingConnections.has(connection.id)}
-                        >
-                          {testingConnections.has(connection.id) ? '🔄' : '🧪'} Test
-                        </button>
-                        <button 
-                          className="action-button edit"
-                          onClick={() => onEdit(connection)}
-                        >
-                          ✏️ Edit
-                        </button>
-                        <button 
-                          className="action-button delete"
-                          onClick={() => onDelete(connection)}
-                        >
-                          🗑️ Delete
-                        </button>
-                      </div>
+            return (
+              <div 
+                key={provider.id} 
+                className={`provider-card ${status}`}
+                style={{ borderColor: statusColor }}
+              >
+                <div className="provider-header">
+                  <div className="provider-info">
+                    <div 
+                      className="provider-icon"
+                      style={{ backgroundColor: provider.color }}
+                    >
+                      {provider.icon}
                     </div>
-                  ))}
-                  
-                  <button 
-                    className="add-connection-button"
-                    onClick={() => onConnect(provider.id)}
-                  >
-                    + Add Connection
-                  </button>
+                    <div>
+                      <h3>{provider.name}</h3>
+                      <p className="provider-description">{provider.description}</p>
+                    </div>
+                  </div>
+                  <div className="status-indicator">
+                    <div 
+                      className={`status-dot ${status}`}
+                      style={{ backgroundColor: statusColor }}
+                    ></div>
+                    <span className="status-text">
+                      {status === 'not-connected' && 'Not Connected'}
+                      {status === 'connected' && `Connected (${providerConnections.length})`}
+                      {status === 'partial' && `Partial (${providerConnections.filter(c => c.status === 'connected').length}/${providerConnections.length})`}
+                      {status === 'error' && 'Connection Error'}
+                      {status === 'pending' && 'Connecting...'}
+                    </span>
+                  </div>
                 </div>
-              )}
-            </div>
-          );
-        })}
+
+                {providerConnections.length === 0 ? (
+                  <div className="no-connections">
+                    <p>No connections configured</p>
+                    <button 
+                      className="connect-button"
+                      onClick={() => onConnect(provider.id)}
+                    >
+                      Connect to {provider.name}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="connections-list">
+                    {providerConnections.map(connection => (
+                      <div key={connection.id} className={`connection-item ${connection.status}`}>
+                        <div className="connection-info">
+                          <div className="connection-header">
+                            <h4>{connection.name}</h4>
+                            {connection.isDefault && (
+                              <span className="default-badge">Default</span>
+                            )}
+                            <div 
+                              className={`connection-status ${connection.status}`}
+                              style={{ backgroundColor: getStatusColor(connection.status) }}
+                            >
+                              {connection.status}
+                            </div>
+                          </div>
+                          
+                          {connection.description && (
+                            <p className="connection-description">{connection.description}</p>
+                          )}
+                          
+                          <div className="connection-meta">
+                            {connection.region && (
+                              <span className="meta-item">📍 {connection.region}</span>
+                            )}
+                            <span className="meta-item">
+                              🕒 {formatLastValidated(connection.lastValidated)}
+                            </span>
+                          </div>
+
+                          {connection.errorMessage && (
+                            <div className="error-message">
+                              ⚠️ {connection.errorMessage}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="connection-actions">
+                          {connection.provider === 'aws' && connection.status === 'connected' && (
+                            <button 
+                              className="action-button ec2"
+                              onClick={() => handleViewEC2Instances(connection)}
+                            >
+                              🖥️ EC2 Instances
+                            </button>
+                          )}
+                          <button 
+                            className="action-button test"
+                            onClick={() => handleTestConnection(connection)}
+                            disabled={testingConnections.has(connection.id)}
+                          >
+                            {testingConnections.has(connection.id) ? '🔄' : '🧪'} Test
+                          </button>
+                          <button 
+                            className="action-button edit"
+                            onClick={() => onEdit(connection)}
+                          >
+                            ✏️ Edit
+                          </button>
+                          <button 
+                            className="action-button delete"
+                            onClick={() => onDelete(connection)}
+                          >
+                            🗑️ Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    <button 
+                      className="add-connection-button"
+                      onClick={() => onConnect(provider.id)}
+                    >
+                      + Add Connection
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
-    </div>
+
+      {/* EC2 Instances Modal */}
+      {selectedConnection && (
+        <EC2InstancesModal
+          isOpen={showEC2Modal}
+          onClose={handleCloseEC2Modal}
+          connectionId={selectedConnection.id}
+          connectionName={selectedConnection.name}
+        />
+      )}
+    </>
   );
 };
 

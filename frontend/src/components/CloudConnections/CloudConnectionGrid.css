@@ -245,57 +245,68 @@
 .connection-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
   margin-top: 12px;
 }
 
 .action-button {
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
   padding: 6px 12px;
-  font-size: 0.8rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease-in-out;
+  transition: all 0.2s;
   display: flex;
   align-items: center;
   gap: 4px;
+  background-color: #ffffff;
 }
 
 .action-button:hover {
-  background: #f8fafc;
-  border-color: #cbd5e0;
+  background-color: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.action-button.test {
+  color: #059669;
+  border-color: #10b981;
+}
+
+.action-button.test:hover {
+  background-color: #ecfdf5;
+}
+
+.action-button.edit {
+  color: #7c3aed;
+  border-color: #8b5cf6;
+}
+
+.action-button.edit:hover {
+  background-color: #f5f3ff;
+}
+
+.action-button.delete {
+  color: #dc2626;
+  border-color: #ef4444;
+}
+
+.action-button.delete:hover {
+  background-color: #fef2f2;
+}
+
+.action-button.ec2 {
+  color: #ea580c;
+  border-color: #f97316;
+}
+
+.action-button.ec2:hover {
+  background-color: #fff7ed;
 }
 
 .action-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.action-button.test {
-  border-color: #2196F3;
-  color: #2196F3;
-}
-
-.action-button.test:hover {
-  background: #f0f9ff;
-}
-
-.action-button.edit {
-  border-color: #FF9800;
-  color: #FF9800;
-}
-
-.action-button.edit:hover {
-  background: #fffbf0;
-}
-
-.action-button.delete {
-  border-color: #F44336;
-  color: #F44336;
-}
-
-.action-button.delete:hover {
-  background: #fdf2f2;
 }
 
 .add-connection-button {

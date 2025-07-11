@@ -41,6 +41,7 @@ export interface DevOpsAnalysis {
 export interface RepositorySummary {
   repoId: string;
   name: string;
+  fullName: string;
   description: string;
   language: string;
   frameworks: string[];
@@ -148,6 +149,47 @@ class RepositoryService {
   async getImportedCloudObjects() {
     const response = await apiClient.get('/repositories/imported-cloud-objects');
     return response.data.importedObjects;
+  }
+
+  /**
+   * Get Terraform files from a GitHub repository
+   */
+  async getTerraformFiles(repoId: string): Promise<{
+    files: Record<string, string>;
+    errors?: string[];
+    repository: {
+      id: string;
+      name: string;
+      owner: string;
+      defaultBranch: string;
+    };
+  }> {
+    try {
+      const response = await apiClient.get(`/github/repository/${repoId}/terraform-files`);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || 'Failed to fetch Terraform files from GitHub');
+    }
+  }
+
+  /**
+   * Clone the repo (if not already cloned) and list all .tf files
+   */
+  async cloneAndListTfFiles(repoId: string): Promise<{ files: { path: string; content: string }[] }> {
+    try {
+      const response = await apiClient.post(`/github/repository/${repoId}/clone-and-list-tf`);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || 'Failed to clone repo or list tf files');
+    }
+  }
+
+  /**
+   * Update (pull or clone) the repo for Terraform visualization
+   */
+  async updateClone(repoId: string): Promise<{ success: boolean; action: string }> {
+    const response = await apiClient.post(`/github/repository/${repoId}/update-clone`);
+    return response.data;
   }
 }
 

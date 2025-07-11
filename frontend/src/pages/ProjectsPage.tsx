@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PlusIcon } from '@heroicons/react/24/outline';
+import { useNavigate } from 'react-router-dom';
 import ProjectCard from '../components/Projects/ProjectCard';
 import CloudConnectionGrid from '../components/CloudConnections/CloudConnectionGrid';
 import ConnectCloudModal from '../components/CloudConnections/ConnectCloudModal';
@@ -41,9 +42,13 @@ interface CloudConnection {
 }
 
 const ProjectsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [cloudConnections, setCloudConnections] = useState<CloudConnection[]>([]);
+  const [repositories, setRepositories] = useState<any[]>([]);
+  const [selectedRepository, setSelectedRepository] = useState<any>(null);
+  const [showRepositoryModal, setShowRepositoryModal] = useState(false);
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [showCloudConnections, setShowCloudConnections] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
@@ -70,17 +75,26 @@ const ProjectsPage: React.FC = () => {
 
   const fetchCloudConnections = async (projectId: string) => {
     try {
-      const response = await apiClient.get(`/cloud/connections/${projectId}`);
-      setCloudConnections(response.data.connections || []);
-    } catch (err: any) {
-      console.error('Failed to fetch cloud connections:', err);
-      setCloudConnections([]);
+      const response = await apiClient.get(`/projects/${projectId}/cloud-connections`);
+      setCloudConnections(response.data.connections);
+    } catch (error) {
+      console.error('Failed to fetch cloud connections:', error);
+    }
+  };
+
+  const fetchRepositories = async (projectId: string) => {
+    try {
+      const response = await apiClient.get(`/projects/${projectId}/repositories`);
+      setRepositories(response.data.repositories);
+    } catch (error) {
+      console.error('Failed to fetch repositories:', error);
     }
   };
 
   const handleProjectSelect = (project: Project) => {
     setSelectedProject(project);
     fetchCloudConnections(project.id);
+    fetchRepositories(project.id);
     setShowCloudConnections(true);
   };
 
@@ -167,6 +181,13 @@ const ProjectsPage: React.FC = () => {
       console.error('Failed to test cloud connection:', error);
       alert(`❌ Connection test failed: ${error.response?.data?.error || error.message}`);
     }
+  };
+
+  const handleRepositorySelect = (repository: any) => {
+    setSelectedRepository(repository);
+    setShowRepositoryModal(false);
+    // Navigate to Terraform visualization with the selected repository
+    navigate(`/terraform/${selectedProject?.id}/${repository.id}`);
   };
 
   if (loading) {
@@ -290,6 +311,42 @@ const ProjectsPage: React.FC = () => {
           provider={selectedProvider}
           projectId={selectedProject?.id || ''}
         />
+
+        {/* Repository Selection Modal for Terraform Visualization */}
+        {showRepositoryModal && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+              <div className="mt-3 text-center">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">
+                  Select Repository for Terraform Visualization
+                </h3>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {repositories.map((repo) => (
+                    <button
+                      key={repo.id}
+                      onClick={() => handleRepositorySelect(repo)}
+                      className="w-full text-left p-3 border border-gray-200 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <div className="font-medium text-gray-900">{repo.name}</div>
+                      <div className="text-sm text-gray-500">{repo.description || 'No description'}</div>
+                      <div className="text-xs text-gray-400 mt-1">
+                        {repo.language} • {repo.private ? 'Private' : 'Public'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-4 flex justify-end space-x-3">
+                  <button
+                    onClick={() => setShowRepositoryModal(false)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
