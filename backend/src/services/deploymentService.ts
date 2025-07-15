@@ -27,12 +27,20 @@ interface TerraformExecutionResult {
 }
 
 class DeploymentService {
-  private terraformDir = path.join(process.cwd(), 'terraform-workspaces');
+  private terraformDir = '/app/terraform-workspaces';
+  private tempDir = path.join(this.terraformDir, 'tmp');
 
   constructor() {
-    // Ensure terraform workspaces directory exists
-    if (!fs.existsSync(this.terraformDir)) {
-      fs.mkdirSync(this.terraformDir, { recursive: true });
+    // Ensure temp directory exists (not the parent)
+    if (!fs.existsSync(this.tempDir)) {
+      fs.mkdirSync(this.tempDir, { recursive: true });
+    }
+    // Set permissions to 2777 for tempDir
+    try {
+      fs.chmodSync(this.tempDir, 0o2777);
+      logger.info('Set permissions 2777 on tempDir', { tempDir: this.tempDir });
+    } catch (chmodErr) {
+      logger.error('Failed to set permissions 2777 on tempDir', { tempDir: this.tempDir, error: chmodErr });
     }
   }
 
@@ -146,24 +154,56 @@ class DeploymentService {
    * Clone repository to local workspace
    */
   private async cloneRepository(repository: any, deploymentId: string): Promise<string> {
-    const workspacePath = path.join(this.terraformDir, deploymentId);
-    
+    // Use a unique temp directory for this operation
+    const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+    const workspacePath = path.join(this.tempDir, `deploy-${deploymentId}-${uniqueId}`);
+
     try {
+      // Clean up if the directory exists (should not, but for safety)
+      if (fs.existsSync(workspacePath)) {
+        try {
+          logger.warn('Temp workspace already exists, removing', { workspacePath });
+          fs.rmSync(workspacePath, { recursive: true, force: true });
+        } catch (rmErr) {
+          logger.error('Failed to remove existing temp workspace', { workspacePath, error: rmErr });
+          throw new Error(`Failed to remove existing temp workspace: ${rmErr}`);
+        }
+      }
+
+      // Ensure parent directory has permissions 2777
+      const parentDir = path.dirname(workspacePath);
+      try {
+        fs.chmodSync(parentDir, 0o2777);
+        logger.info('Set permissions 2777 on parentDir before clone', { parentDir });
+      } catch (chmodErr) {
+        logger.error('Failed to set permissions 2777 on parentDir', { parentDir, error: chmodErr });
+      }
+
+      // Log directory state before clone
+      let parentContents: string[] = [];
+      let parentPerms = '';
+      try {
+        parentContents = fs.readdirSync(parentDir);
+        parentPerms = fs.statSync(parentDir).mode.toString(8);
+      } catch (dirErr) {
+        logger.error('Failed to stat parent dir before clone', { parentDir, error: dirErr });
+      }
+      logger.info('Preparing to git clone', { workspacePath, parentDir, parentContents, parentPerms });
+
       // Get user's GitHub token
       const user = await databaseService.findUserById(repository.userId);
       if (!user || !user.githubAccessToken) {
         throw new Error('User not found or GitHub token not available');
       }
-      
-      const octokit = new Octokit({ auth: user.githubAccessToken });
 
-      // Clone repository
-      await execAsync(`git clone https://github.com/${repository.owner}/${repository.name}.git ${workspacePath}`);
-      
+      // Clone repository (do NOT pre-create workspacePath)
+      const repoUrl = `https://github.com/${repository.owner}/${repository.name}.git`;
+      await execAsync(`git clone ${repoUrl} ${workspacePath}`);
+
       logger.info('Repository cloned successfully', { deploymentId, workspacePath });
       return workspacePath;
     } catch (error: any) {
-      logger.error('Error cloning repository', error);
+      logger.error('Error cloning repository', { error, workspacePath });
       throw new Error('Failed to clone repository');
     }
   }

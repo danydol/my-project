@@ -962,131 +962,125 @@ class DatabaseService {
     resourceType: string;
     resourceName: string;
   }): Promise<any> {
+    const env: any = { ...process.env };
     try {
-      // Fetch repository and cloud connection
-      const repository = await this.getRepositoryById(repoId);
-      if (!repository) throw new Error('Repository not found');
-
-      const cloudConnection = await this.getCloudConnection(cloudConnectionId);
-      if (!cloudConnection) throw new Error('Cloud connection not found');
-
-      // Create a temporary directory for Terraform operations
-      const { exec } = require('child_process');
-      const util = require('util');
-      const execAsync = util.promisify(exec);
+      // Require dependencies only once at the top
+      const glob = require('glob');
+      const os = require('os');
       const fs = require('fs').promises;
       const path = require('path');
-      const os = require('os');
-
-      const tempDir = path.join(os.tmpdir(), `terraform-import-${Date.now()}`);
-      await fs.mkdir(tempDir, { recursive: true });
+      const { v4: uuidv4 } = require('uuid');
+      const util = require('util');
+      const exec = require('child_process').exec;
+      const execAsync = util.promisify(exec);
 
       const logs: string[] = [];
       const addLog = (message: string) => {
         logs.push(`[${new Date().toISOString()}] ${message}`);
         logger.info(`Terraform Import: ${message}`);
       };
+      // Clean up all existing terraform-import-* directories in /tmp before starting a new import
+      const tmpBase = os.tmpdir();
+      const importDirs = await new Promise<string[]>((resolve, reject) => {
+        glob(`${tmpBase}/terraform-import-*`, (err: any, matches: string[]) => {
+          if (err) reject(err);
+          else resolve(matches);
+        });
+      });
+      for (const dir of importDirs) {
+        try {
+          await fs.rm(dir, { recursive: true, force: true });
+          addLog(`Deleted old import temp directory: ${dir}`);
+        } catch (e) {
+          addLog(`Error deleting old import temp directory ${dir}: ${e}`);
+        }
+      }
+      // Fetch repository and cloud connection
+      const repository = await this.getRepositoryById(repoId);
+      if (!repository) throw new Error('Repository not found');
+      const cloudConnection = await this.getCloudConnection(cloudConnectionId);
+      if (!cloudConnection) throw new Error('Cloud connection not found');
 
-      // Variables for main.tf handling
-      let mainTfExists = false;
-      let originalMainTf = '';
-      const mainTfPath = path.join(tempDir, 'main.tf');
+      // Decrypt and validate credentials before proceeding
+      const { validateAWSCredentials, validateGCPCredentials, validateAzureCredentials, decryptCredentials } = require('./cloudService');
+      const decryptedConfig = await decryptCredentials(cloudConnection.config);
+      let validationResult = { valid: true, error: undefined };
+      if (cloudConnection.provider === 'aws') {
+        validationResult = await validateAWSCredentials(decryptedConfig);
+      } else if (cloudConnection.provider === 'gcp') {
+        validationResult = await validateGCPCredentials(decryptedConfig);
+      } else if (cloudConnection.provider === 'azure') {
+        validationResult = await validateAzureCredentials(decryptedConfig);
+      }
+      if (!validationResult.valid) {
+        addLog(`Cloud connection credentials are invalid: ${validationResult.error}`);
+        throw new Error('Cloud connection credentials are invalid: ' + validationResult.error);
+      }
 
+      // Set AWS credentials in env if provider is aws
+      if (cloudConnection.provider === 'aws') {
+        env.AWS_ACCESS_KEY_ID = decryptedConfig.accessKeyId;
+        env.AWS_SECRET_ACCESS_KEY = decryptedConfig.secretAccessKey;
+        env.AWS_DEFAULT_REGION = cloudConnection.region || 'us-east-1';
+        if (decryptedConfig.sessionToken) {
+          env.AWS_SESSION_TOKEN = decryptedConfig.sessionToken;
+        }
+        addLog('Set AWS credentials in environment for Terraform (not logging secrets)');
+      }
+
+      // Before cloning, create a unique temp directory
+      let tmpDir = '';
       try {
-        addLog('Starting Terraform import process...');
-        addLog(`Repository: ${repository.fullName}`);
-        addLog(`Cloud Connection: ${cloudConnection.name} (${cloudConnection.provider})`);
-        addLog(`Object Type: ${objectType}`);
-        addLog(`Object ID: ${objectId}`);
-        addLog(`Resource Type: ${resourceType}`);
-        addLog(`Resource Name: ${resourceName}`);
-
-        // Clean up resource type and name to prevent shell syntax errors
-        const cleanResourceType = resourceType.replace(/[()\s]/g, '').trim();
-        const cleanResourceName = resourceName.replace(/[()\s]/g, '').trim();
-        
-        if (cleanResourceType !== resourceType) {
-          addLog(`Cleaned resource type from "${resourceType}" to "${cleanResourceType}"`);
-        }
-        if (cleanResourceName !== resourceName) {
-          addLog(`Cleaned resource name from "${resourceName}" to "${cleanResourceName}"`);
-        }
-
-        // Clone the repository to temp directory
-        addLog('Cloning repository...');
-        // Use authenticated URL with token for clone and push
+        // Ensure tmpBaseDir exists
+        const tmpBaseDir = '/app/terraform-workspaces/tmp';
+        await fs.mkdir(tmpBaseDir, { recursive: true });
+        // Create a unique subdirectory
+        tmpDir = path.join(tmpBaseDir, uuidv4());
+        await fs.mkdir(tmpDir);
+        addLog(`Cloning repository to temp directory: ${tmpDir}`);
+        // Clone the repo to tmpDir
         let authenticatedUrl = repository.cloneUrl;
         if (repository.cloneUrl.startsWith('https://') && repository.userId) {
-          // Fetch the user to get the GitHub access token
           const user = await this.findUserById(repository.userId);
           if (user && user.githubAccessToken) {
-            // Insert token into the URL
             authenticatedUrl = repository.cloneUrl.replace('https://', `https://${user.githubAccessToken}@`);
           }
         }
-        const cloneCommand = `git clone ${authenticatedUrl} ${tempDir}`;
-        await execAsync(cloneCommand);
-        addLog('Repository cloned successfully');
+        await execAsync(`git clone ${authenticatedUrl} ${tmpDir}`);
+        // Use tmpDir for all further operations (terraformDir = path.join(tmpDir, 'terraform'))
+        const repoBaseDir = tmpDir;
+        const terraformDir = path.join(repoBaseDir, 'terraform');
+        await fs.mkdir(terraformDir, { recursive: true });
+        addLog('Ensured terraform/ directory exists');
 
-        // Ensure .gitignore exists to prevent committing large or sensitive files
-        const gitignorePath = path.join(tempDir, '.gitignore');
-        const gitignoreContent = `.terraform/
-*.tfstate
-*.tfstate.*
-crash.log
-`; 
-        await fs.writeFile(gitignorePath, gitignoreContent);
-        addLog('Created .gitignore to exclude .terraform and state files');
+        // Update paths for .tf files
+        const importedResourcesPath = path.join(terraformDir, 'imported_resources.tf');
+        // Remove the old mainTfPath declaration
+        // const mainTfPath = path.join(terraformDir, 'main.tf');
+        // Use only the terraformDir version
+        const mainTfPath = path.join(terraformDir, 'main.tf');
 
-        // Set up cloud credentials based on provider
-        const env: any = { ...process.env };
-        
-        if (cloudConnection.provider === 'aws') {
-          const decryptedConfig = await decryptCredentials(cloudConnection.config as string);
-          env.AWS_ACCESS_KEY_ID = decryptedConfig.accessKeyId;
-          env.AWS_SECRET_ACCESS_KEY = decryptedConfig.secretAccessKey;
-          env.AWS_DEFAULT_REGION = cloudConnection.region || 'us-east-1';
-          if (decryptedConfig.sessionToken) {
-            env.AWS_SESSION_TOKEN = decryptedConfig.sessionToken;
-          }
-          addLog('AWS credentials configured');
-        } else if (cloudConnection.provider === 'gcp') {
-          const decryptedConfig = await decryptCredentials(cloudConnection.config as string);
-          env.GOOGLE_APPLICATION_CREDENTIALS = decryptedConfig.serviceAccountKey;
-          env.GOOGLE_CLOUD_PROJECT = decryptedConfig.projectId;
-          addLog('GCP credentials configured');
-        } else if (cloudConnection.provider === 'azure') {
-          const decryptedConfig = await decryptCredentials(cloudConnection.config as string);
-          env.AZURE_CLIENT_ID = decryptedConfig.clientId;
-          env.AZURE_CLIENT_SECRET = decryptedConfig.clientSecret;
-          env.AZURE_TENANT_ID = decryptedConfig.tenantId;
-          env.AZURE_SUBSCRIPTION_ID = decryptedConfig.subscriptionId;
-          addLog('Azure credentials configured');
-        }
-
-        // Initialize Terraform
-        addLog('Initializing Terraform...');
-        const initCommand = `cd ${tempDir} && terraform init`;
+        // Forceful rewrite: main.tf existence and backup logic
+        let mainTfExists = false;
+        let originalMainTf = '';
         try {
-          await execAsync(initCommand, { env });
-          addLog('Terraform initialized successfully');
-        } catch (initError) {
-          let errorMessage = 'Unknown error';
-          if (initError && typeof initError === 'object' && 'message' in initError) {
-            errorMessage = (initError as any).message;
-          } else if (typeof initError === 'string') {
-            errorMessage = initError;
-          }
-          addLog(`Terraform init failed: ${errorMessage}`);
-          logger.error('Terraform init failed', initError);
-          throw new Error(`Terraform initialization failed: ${errorMessage}`);
-        }
+          await fs.access(mainTfPath);
+          mainTfExists = true;
+          originalMainTf = await fs.readFile(mainTfPath, 'utf8');
+        } catch {}
 
-        // Create or update Terraform configuration file
-        const importedResourcesPath = path.join(tempDir, 'imported_resources.tf');
-        
-        // Ensure main.tf exists with only the provider block for terraform init
-        if (!mainTfExists) {
+        if (mainTfExists) {
+          // backup logic
+          const backupPath = mainTfPath + '.backup';
+          try {
+            await fs.access(backupPath);
+            addLog('Original main.tf already exists, creating backup');
+            await fs.writeFile(backupPath, originalMainTf);
+            addLog('Original main.tf backed up');
+          } catch (backupError) {
+            addLog(`Warning: Could not create backup of main.tf: ${backupError}`);
+          }
+        } else {
           const providerBlock = cloudConnection.provider === 'aws'
             ? `provider "aws" {\n  region = \"${cloudConnection.region}\"\n}\n`
             : cloudConnection.provider === 'gcp'
@@ -1100,31 +1094,41 @@ crash.log
 
         // Generate minimal resource block with dummy values for required arguments
         let resourceConfig = '';
+        // Map resourceType to correct AWS resource if needed
+        let fixedResourceType = resourceType;
         if (cloudConnection.provider === 'aws') {
-          if (cleanResourceType === 'aws_instance') {
-            resourceConfig = `resource "${cleanResourceType}" "${cleanResourceName}" {
+          if (resourceType === 'ec2') fixedResourceType = 'aws_instance';
+          // Add more mappings if needed
+        }
+        // Sanitize resource name for Terraform
+        const sanitizedResourceName = resourceName.replace(/[^a-zA-Z0-9_]/g, '_');
+        // Use fixedResourceType and sanitizedResourceName everywhere
+        // Example for resource block:
+        if (cloudConnection.provider === 'aws') {
+          if (fixedResourceType === 'aws_instance') {
+            resourceConfig = `resource "${fixedResourceType}" "${sanitizedResourceName}" {
   # Dummy values for import - will be replaced with actual values after import
   ami           = "ami-dummy"
   instance_type = "t2.micro"
   
   # Import will populate the actual values
 }`;
-          } else if (cleanResourceType === 'aws_security_group') {
-            resourceConfig = `resource "${cleanResourceType}" "${cleanResourceName}" {
+          } else if (fixedResourceType === 'aws_security_group') {
+            resourceConfig = `resource "${fixedResourceType}" "${sanitizedResourceName}" {
   # Dummy values for import - will be replaced with actual values after import
   name_prefix = "dummy-"
   
   # Import will populate the actual values
 }`;
-          } else if (cleanResourceType === 'aws_vpc') {
-            resourceConfig = `resource "${cleanResourceType}" "${cleanResourceName}" {
+          } else if (fixedResourceType === 'aws_vpc') {
+            resourceConfig = `resource "${fixedResourceType}" "${sanitizedResourceName}" {
   # Dummy values for import - will be replaced with actual values after import
   cidr_block = "10.0.0.0/16"
   
   # Import will populate the actual values
 }`;
-          } else if (cleanResourceType === 'aws_subnet') {
-            resourceConfig = `resource "${cleanResourceType}" "${cleanResourceName}" {
+          } else if (fixedResourceType === 'aws_subnet') {
+            resourceConfig = `resource "${fixedResourceType}" "${sanitizedResourceName}" {
   # Dummy values for import - will be replaced with actual values after import
   vpc_id     = "vpc-dummy"
   cidr_block = "10.0.1.0/24"
@@ -1133,13 +1137,13 @@ crash.log
 }`;
           } else {
             // Generic AWS resource
-            resourceConfig = `resource "${cleanResourceType}" "${cleanResourceName}" {
+            resourceConfig = `resource "${fixedResourceType}" "${sanitizedResourceName}" {
   # Import will populate the actual values
 }`;
           }
         } else if (cloudConnection.provider === 'gcp') {
-          if (cleanResourceType === 'google_compute_instance') {
-            resourceConfig = `resource "${cleanResourceType}" "${cleanResourceName}" {
+          if (resourceType === 'google_compute_instance') {
+            resourceConfig = `resource "${resourceType}" "${resourceName}" {
   # Dummy values for import - will be replaced with actual values after import
   name         = "dummy-instance"
   machine_type = "e2-micro"
@@ -1154,13 +1158,13 @@ crash.log
   # Import will populate the actual values
 }`;
           } else {
-            resourceConfig = `resource "${cleanResourceType}" "${cleanResourceName}" {
+            resourceConfig = `resource "${resourceType}" "${resourceName}" {
   # Import will populate the actual values
 }`;
           }
         } else if (cloudConnection.provider === 'azure') {
-          if (cleanResourceType === 'azurerm_virtual_machine') {
-            resourceConfig = `resource "${cleanResourceType}" "${cleanResourceName}" {
+          if (resourceType === 'azurerm_virtual_machine') {
+            resourceConfig = `resource "${resourceType}" "${resourceName}" {
   # Dummy values for import - will be replaced with actual values after import
   name                  = "dummy-vm"
   location              = "East US"
@@ -1170,13 +1174,13 @@ crash.log
   # Import will populate the actual values
 }`;
           } else {
-            resourceConfig = `resource "${cleanResourceType}" "${cleanResourceName}" {
+            resourceConfig = `resource "${resourceType}" "${resourceName}" {
   # Import will populate the actual values
 }`;
           }
         } else {
           // Generic resource for other providers
-          resourceConfig = `resource "${cleanResourceType}" "${cleanResourceName}" {
+          resourceConfig = `resource "${resourceType}" "${resourceName}" {
   # Import will populate the actual values
 }`;
         }
@@ -1186,30 +1190,59 @@ crash.log
 
         // Run terraform init again after writing/updating configuration
         addLog('Re-initializing Terraform after config update...');
+        const initCommand = `cd ${terraformDir} && terraform init`;
         try {
-          await execAsync(initCommand, { env });
+          const initResult = await execAsync(initCommand, { env });
+          addLog(`Terraform init stdout: ${initResult.stdout}`);
+          addLog(`Terraform init stderr: ${initResult.stderr}`);
           addLog('Terraform re-initialized successfully after config update');
         } catch (initError) {
+          const err: any = initError;
+          if (err && err.stdout) addLog(`Terraform init stdout: ${err.stdout}`);
+          if (err && err.stderr) addLog(`Terraform init stderr: ${err.stderr}`);
           let errorMessage = 'Unknown error';
-          if (initError && typeof initError === 'object' && 'message' in initError) {
-            errorMessage = (initError as any).message;
-          } else if (typeof initError === 'string') {
-            errorMessage = initError;
+          if (err && typeof err === 'object' && 'message' in err) {
+            errorMessage = err.message;
+          } else if (typeof err === 'string') {
+            errorMessage = err;
           }
           addLog(`Terraform re-init after config update failed: ${errorMessage}`);
-          logger.error('Terraform re-init after config update failed', initError);
+          logger.error('Terraform re-init after config update failed', err);
           throw new Error(`Terraform re-initialization after config update failed: ${errorMessage}`);
         }
 
+        // Log contents of /app/terraform-workspaces/tmp and tmpDir before import
+        try {
+          const tmpBaseDir = '/app/terraform-workspaces/tmp';
+          const tmpBaseContents = await fs.readdir(tmpBaseDir);
+          addLog(`Contents of ${tmpBaseDir}: ${JSON.stringify(tmpBaseContents)}`);
+          if (tmpDir) {
+            const tmpDirContents = await fs.readdir(tmpDir);
+            addLog(`Contents of ${tmpDir}: ${JSON.stringify(tmpDirContents)}`);
+          }
+        } catch (lsErr) {
+          addLog(`Error listing directory contents: ${lsErr}`);
+        }
         // Run terraform import
-        addLog(`Running terraform import for ${cleanResourceType}.${cleanResourceName}...`);
-        const importCommand = `cd ${tempDir} && terraform import ${cleanResourceType}.${cleanResourceName} ${objectId}`;
-        await execAsync(importCommand, { env });
-        addLog('Terraform import completed successfully');
+        addLog(`Running terraform import for ${resourceType}.${resourceName}...`);
+        const importCommand = `cd ${terraformDir} && terraform import ${fixedResourceType}.${sanitizedResourceName} ${objectId}`;
+        let importResult;
+        try {
+          importResult = await execAsync(importCommand, { env });
+          addLog(`Terraform import stdout: ${importResult.stdout}`);
+          addLog(`Terraform import stderr: ${importResult.stderr}`);
+          addLog('Terraform import completed successfully');
+        } catch (importError) {
+          const err: any = importError;
+          if (err && err.stdout) addLog(`Terraform import stdout: ${err.stdout}`);
+          if (err && err.stderr) addLog(`Terraform import stderr: ${err.stderr}`);
+          addLog(`Terraform import failed: ${err.message || err}`);
+          throw new Error(`Terraform import failed: ${err.message || err}`);
+        }
 
         // After successful import, fetch the real values and update the resource block
         addLog('Fetching real resource values...');
-        const showCommand = `cd ${tempDir} && terraform show -json`;
+        const showCommand = `cd ${terraformDir} && terraform show -json`;
         const showResult = await execAsync(showCommand, { env });
         const terraformState = JSON.parse(showResult.stdout);
         
@@ -1218,7 +1251,7 @@ crash.log
         if (terraformState.values && terraformState.values.root_module) {
           const resources = terraformState.values.root_module.resources || [];
           importedResource = resources.find((r: any) => 
-            r.type === cleanResourceType && r.name === cleanResourceName
+            r.type === resourceType && r.name === resourceName
           );
         }
         
@@ -1260,12 +1293,12 @@ crash.log
             // Add more resource types as needed
           };
           // Start the resource block
-          let updatedResourceConfig = `resource "${cleanResourceType}" "${cleanResourceName}" {\n`;
+          let updatedResourceConfig = `resource "${resourceType}" "${resourceName}" {\n`;
           if (importedResource.values) {
             Object.entries(importedResource.values).forEach(([key, value]) => {
               if (key !== 'id' && key !== 'arn' && key !== 'tags_all') {
                 // Only include allowed arguments for this resource type
-                if (allowedArgs[cleanResourceType] && !allowedArgs[cleanResourceType].includes(key)) {
+                if (allowedArgs[resourceType] && !allowedArgs[resourceType].includes(key)) {
                   return;
                 }
                 // List of block keys and their required arguments
@@ -1317,7 +1350,7 @@ crash.log
 
         // Run terraform plan to see what would be created
         addLog('Running terraform plan...');
-        const planCommand = `cd ${tempDir} && terraform plan -out=tfplan`;
+        const planCommand = `cd ${terraformDir} && terraform plan -out=tfplan`;
         const { stdout: planOutput, stderr: planError } = await execAsync(planCommand, { env });
         
         if (planError && !planError.includes('No changes')) {
@@ -1328,7 +1361,7 @@ crash.log
 
         // Get the current state
         addLog('Getting Terraform state...');
-        const stateCommand = `cd ${tempDir} && terraform show -json`;
+        const stateCommand = `cd ${terraformDir} && terraform show -json`;
         const { stdout: stateOutput } = await execAsync(stateCommand, { env });
         const state = JSON.parse(stateOutput);
         addLog('Terraform state retrieved successfully');
@@ -1339,21 +1372,22 @@ crash.log
         if (repository.cloneUrl.startsWith('https://') && repository.userId) {
           const user = await this.findUserById(repository.userId);
           if (user && user.githubAccessToken) {
-            const setUrlCommand = `cd ${tempDir} && git remote set-url origin ${repository.cloneUrl.replace('https://', `https://${user.githubAccessToken}@`)}`;
+            const setUrlCommand = `cd ${terraformDir} && git remote set-url origin ${repository.cloneUrl.replace('https://', `https://${user.githubAccessToken}@`)}`;
             await execAsync(setUrlCommand, { env });
           }
         }
-        // Only add .tf and .tfvars files (revert to git add . and rely on .gitignore for safety)
+        // Stage, commit, and push only the terraform/ directory
+        addLog('Staging terraform/ directory for commit...');
         const gitCommands = [
-          `cd ${tempDir} && git add .`,
-          `cd ${tempDir} && git config user.email "deployai@example.com"`,
-          `cd ${tempDir} && git config user.name "DeployAI"`,
-          `cd ${tempDir} && git commit -m "Import cloud object: ${objectType} ${objectId}"`,
-          `cd ${tempDir} && git push origin ${repository.defaultBranch}`
+          `cd ${terraformDir} && git add .`,
+          `cd ${terraformDir} && git config user.email "deployai@example.com"`,
+          `cd ${terraformDir} && git config user.name "DeployAI"`,
+          `cd ${terraformDir} && git commit -m "Import cloud object: ${objectType} ${objectId}"`,
+          `cd ${terraformDir} && git push origin ${repository.defaultBranch}`
         ];
-
         for (const command of gitCommands) {
-          await execAsync(command, { env });
+          await execAsync(command);
+          addLog(`Ran: ${command}`);
         }
         addLog('Changes pushed to repository successfully');
 
@@ -1392,34 +1426,19 @@ crash.log
           success: true,
           repository: updatedRepository,
           logs,
-          stateFilePath: path.join(tempDir, 'terraform.tfstate'),
+          stateFilePath: path.join(terraformDir, 'terraform.tfstate'),
           terraformConfig: resourceConfig
         };
 
       } finally {
-        // Clean up temp directory only if there was no error
-        if (!logs.some(log => log.includes('Terraform init failed') || log.includes('Error importing cloud object') || log.includes('Terraform import failed'))) {
+        // Clean up the temp directory
+        if (tmpDir) {
           try {
-            // Restore original main.tf if it was modified
-            if (mainTfExists && originalMainTf) {
-              const backupPath = mainTfPath + '.backup';
-              try {
-                await fs.access(backupPath);
-                addLog('Restoring original main.tf from backup');
-                await fs.writeFile(mainTfPath, originalMainTf);
-                await fs.unlink(backupPath);
-                addLog('Original main.tf restored and backup removed');
-              } catch (backupError) {
-                addLog(`Warning: Could not restore main.tf backup: ${backupError}`);
-              }
-            }
-            await fs.rm(tempDir, { recursive: true, force: true });
-            addLog('Temporary directory cleaned up');
-          } catch (cleanupError) {
-            addLog(`Warning: Failed to cleanup temp directory: ${cleanupError}`);
+            await fs.rm(tmpDir, { recursive: true, force: true });
+            addLog(`Cleaned up temp directory: ${tmpDir}`);
+          } catch (cleanupErr) {
+            addLog(`Failed to clean up temp directory: ${tmpDir}, error: ${cleanupErr}`);
           }
-        } else {
-          addLog(`Temporary directory retained for debugging: ${tempDir}`);
         }
       }
 
@@ -1429,65 +1448,65 @@ crash.log
     }
   }
 
-  /**
-   * Generate Terraform configuration for imported resources
-   */
-  private generateTerraformConfig(provider: string, resourceType: string, resourceName: string, objectId: string, mainTfExists: boolean): string {
-    let config = `# Imported resource: ${resourceType}.${resourceName}
+/**
+ * Generate Terraform configuration for imported resources
+ */
+private generateTerraformConfig(provider: string, resourceType: string, resourceName: string, objectId: string, mainTfExists: boolean): string {
+  let config = `# Imported resource: ${resourceType}.${resourceName}
 # Object ID: ${objectId}
 # Provider: ${provider}
 # Generated by DeployAI on ${new Date().toISOString()}
 
 `;
 
-    // Only include required_providers if main.tf doesn't exist
-    if (!mainTfExists) {
-      config += `terraform {
+  // Only include required_providers if main.tf doesn't exist
+  if (!mainTfExists) {
+    config += `terraform {
   required_providers {
 `;
 
-      let providerConfig = '';
+    let providerConfig = '';
 
-      switch (provider.toLowerCase()) {
-        case 'aws':
-          providerConfig = `    aws = {
+    switch (provider.toLowerCase()) {
+      case 'aws':
+        providerConfig = `    aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }`;
-          break;
+        break;
 
-        case 'gcp':
-          providerConfig = `    google = {
+      case 'gcp':
+        providerConfig = `    google = {
       source  = "hashicorp/google"
       version = "~> 4.0"
     }`;
-          break;
+        break;
 
-        case 'azure':
-          providerConfig = `    azurerm = {
+      case 'azure':
+        providerConfig = `    azurerm = {
       source  = "hashicorp/azurerm"
       version = "~> 3.0"
     }`;
-          break;
+        break;
 
-        default:
-          providerConfig = `    # Unknown provider: ${provider}`;
-      }
+      default:
+        providerConfig = `    # Unknown provider: ${provider}`;
+    }
 
-      config += `
+    config += `
 ${providerConfig}
   }
 }
 
 `;
-    }
+  }
 
-    // Add the resource configuration
-    let resourceConfig = '';
+  // Add the resource configuration
+  let resourceConfig = '';
 
-    switch (provider.toLowerCase()) {
-      case 'aws':
-        resourceConfig = `resource "${resourceType}" "${resourceName}" {
+  switch (provider.toLowerCase()) {
+    case 'aws':
+      resourceConfig = `resource "${resourceType}" "${resourceName}" {
   # This resource was imported from existing infrastructure
   # Object ID: ${objectId}
   # 
@@ -1504,10 +1523,10 @@ ${providerConfig}
   # instance_type = "t3.micro"
   # ami           = "ami-12345678"
 }`;
-        break;
+      break;
 
-      case 'gcp':
-        resourceConfig = `resource "${resourceType}" "${resourceName}" {
+    case 'gcp':
+      resourceConfig = `resource "${resourceType}" "${resourceName}" {
   # This resource was imported from existing infrastructure
   # Object ID: ${objectId}
   # 
@@ -1526,10 +1545,10 @@ ${providerConfig}
   # name = "${resourceName}"
   # machine_type = "e2-micro"
   # zone = "us-central1-a"`;
-        break;
+      break;
 
-      case 'azure':
-        resourceConfig = `resource "${resourceType}" "${resourceName}" {
+    case 'azure':
+      resourceConfig = `resource "${resourceType}" "${resourceName}" {
   # This resource was imported from existing infrastructure
   # Object ID: ${objectId}
   # 
@@ -1549,22 +1568,22 @@ ${providerConfig}
   # resource_group_name = "my-resource-group"
   # location = "East US"
   # vm_size = "Standard_DS1_v2"`;
-        break;
+      break;
 
-      default:
-        resourceConfig = `resource "${resourceType}" "${resourceName}" {
+    default:
+      resourceConfig = `resource "${resourceType}" "${resourceName}" {
   # This resource was imported from existing infrastructure
   # Object ID: ${objectId}
   # Provider: ${provider}
   # 
   # Please configure this resource according to your provider's documentation
 }`;
-    }
+  }
 
-    config += resourceConfig;
+  config += resourceConfig;
 
-    // Add output
-    config += `
+  // Add output
+  config += `
 
 # Output the imported resource information
 output "${resourceName}_info" {
@@ -1577,48 +1596,48 @@ output "${resourceName}_info" {
   }
 }`;
 
-    return config;
-  }
+  return config;
+}
 
-  async getProjectByRepository(owner: string, repository: string): Promise<Project | null> {
-    try {
-      const repo = await this.prisma.repository.findFirst({
-        where: { 
-          fullName: `${owner}/${repository}`,
-          isActive: true,
-        },
-        include: {
-          project: true,
-        },
-      });
+async getProjectByRepository(owner: string, repository: string): Promise<Project | null> {
+  try {
+    const repo = await this.prisma.repository.findFirst({
+      where: { 
+        fullName: `${owner}/${repository}`,
+        isActive: true,
+      },
+      include: {
+        project: true,
+      },
+    });
 
-      return repo?.project || null;
-    } catch (error) {
-      logger.error('Error fetching project by repository', error);
-      throw error;
-    }
+    return repo?.project || null;
+  } catch (error) {
+    logger.error('Error fetching project by repository', error);
+    throw error;
   }
+}
 
-  // Get all cloud connections for all projects the user has access to
-  async getAllCloudConnectionsForUser(userId: string): Promise<CloudConnection[]> {
-    try {
-      // Get all projects for the user
-      const projects = await this.prisma.project.findMany({
-        where: { userId },
-        select: { id: true }
-      });
-      const projectIds = projects.map(p => p.id);
-      if (projectIds.length === 0) return [];
-      // Get all cloud connections for these projects
-      return await this.prisma.cloudConnection.findMany({
-        where: { projectId: { in: projectIds } },
-        orderBy: { createdAt: 'desc' }
-      });
-    } catch (error) {
-      logger.error('Error fetching all cloud connections for user', error);
-      throw error;
-    }
+// Get all cloud connections for all projects the user has access to
+async getAllCloudConnectionsForUser(userId: string): Promise<CloudConnection[]> {
+  try {
+    // Get all projects for the user
+    const projects = await this.prisma.project.findMany({
+      where: { userId },
+      select: { id: true }
+    });
+    const projectIds = projects.map(p => p.id);
+    if (projectIds.length === 0) return [];
+    // Get all cloud connections for these projects
+    return await this.prisma.cloudConnection.findMany({
+      where: { projectId: { in: projectIds } },
+      orderBy: { createdAt: 'desc' }
+    });
+  } catch (error) {
+    logger.error('Error fetching all cloud connections for user', error);
+    throw error;
   }
+}
 }
 
 export default new DatabaseService(); 
