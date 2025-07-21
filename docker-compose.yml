@@ -1,0 +1,138 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: deploy-ai-postgres
+    environment:
+      POSTGRES_DB: deployai
+      POSTGRES_USER: deployai
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - deploy-ai-network
+
+  # MongoDB for chat storage
+  mongodb:
+    image: mongo:7-jammy
+    container_name: deploy-ai-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: deployai
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: deployai_chat
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - deploy-ai-network
+
+  # Redis for caching and job queues
+  redis:
+    image: redis:7-alpine
+    container_name: deploy-ai-redis
+    ports:
+      - "6382:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - deploy-ai-network
+
+  # ChromaDB for vector storage
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: deploy-ai-chromadb
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
+    ports:
+      - "8001:8000"
+    volumes:
+      - chromadb_data:/chroma/chroma
+    networks:
+      - deploy-ai-network
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: deploy-ai-backend
+    environment:
+      - NODE_ENV=production
+      - PORT=3005
+      - CORS_ORIGIN=https://aaa7457a30f3.ngrok-free.app
+      - DATABASE_URL=postgresql://deployai:password@postgres:5432/deployai
+      - MONGODB_URL=mongodb://deployai:password@mongodb:27017/deployai_chat?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=deploy-ai-super-secret-jwt-key-change-in-production
+      - JWT_EXPIRES_IN=7d
+      - RATE_LIMIT_MAX_REQUESTS=10000
+      - RATE_LIMIT_WINDOW_MS=900000
+      - OPENAI_API_KEY=REDACTED
+      - GITHUB_CLIENT_ID=Iv23liAnHzCtZ3R480Ox
+      - GITHUB_CLIENT_SECRET=bc2d1ef5f386243cc4378ad5a1d5dee3cdd059dd
+      - GITHUB_CALLBACK_URL=https://aaa7457a30f3.ngrok-free.app/api/auth/github/callback
+    ports:
+      - "3005:3005"
+    depends_on:
+      - postgres
+      - redis
+      - mongodb
+      - chromadb
+    networks:
+      - deploy-ai-network
+    restart: unless-stopped
+    volumes:
+      # - ./backend:/app
+      - /app/node_modules
+
+  # Frontend React App
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: deploy-ai-frontend
+    environment:
+      - REACT_APP_API_URL= https://aaa7457a30f3.ngrok-free.app
+    ports:
+      - "3004:3000"
+    depends_on:
+      - backend
+    volumes:
+      # - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - deploy-ai-network
+    restart: unless-stopped
+
+  # Nginx reverse proxy (optional) - DISABLED: Using nginx in frontend container
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: deploy-ai-nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./ssl:/etc/nginx/ssl:ro
+  #   depends_on:
+  #     - frontend
+  #     - backend
+  #   networks:
+  #     - deploy-ai-network
+  #   restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  mongodb_data:
+  chromadb_data:
+
+networks:
+  deploy-ai-network:
+    driver: bridge 
